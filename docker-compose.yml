@@ -1,0 +1,29 @@
+# docker-compose.yml
+version: '3.8'
+
+services:
+  dashboard:
+    build: .
+    ports:
+      - "8080:80"
+    environment:
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./data/messages.db:/usr/share/nginx/html/data/messages.db  # 映射消息数据库
+    restart: unless-stopped
+    networks:
+      - smart-cs-network
+
+  # 可扩展：AI 网关服务（未来）
+  # ai-gateway:
+  #   image: coze-proxy:latest
+  #   ports:
+  #     - "3001:3000"
+  #   environment:
+  #     - COZE_API_KEY=xxx
+  #   networks:
+  #     - smart-cs-network
+
+networks:
+  smart-cs-network:
+    driver: bridge

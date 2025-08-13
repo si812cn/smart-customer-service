@@ -1,0 +1,41 @@
+{
+  "name": "smart-customer-service",
+  "version": "1.0.0",
+  "description": "智能客服系统 - 支持抖音、快手、小红书、淘宝、京东、百度、视频号、TikTok",
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "tsc -w",
+    "build": "npm run clean && npm run compile && npm run zip",
+    "compile": "tsc",
+    "zip": "node scripts/build-zip.js",
+    "preview": "npx serve -s dashboard/dist",
+    "build:dashboard": "cd dashboard && npm run build",
+    "clean": "rimraf dist && rimraf smart-customer-service.zip"
+  },
+  "keywords": [
+    "browser-extension",
+    "live-chat",
+    "ai-reply",
+    "automation"
+  ],
+  "author": "Smart Customer Service Team",
+  "license": "MIT",
+  "dependencies": {
+    "idb": "^8.0.3",
+    "typescript": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.248",
+    "@types/react": "^18.0.0",
+    "@types/react-dom": "^18.0.0",
+    "rimraf": "^5.0.0",
+    "tslib": "^2.5.0"
+  },
+  "browserslist": [
+    "last 2 versions",
+    "not ie <= 11"
+  ],
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
