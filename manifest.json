@@ -1,74 +1,97 @@
-// manifest.json
 {
   "manifest_version": 3,
   "name": "智能客服助手",
   "version": "1.0.0",
-  "description": "支持抖音、快手、小红书等平台的AI自动回复系统",
+  "description": "提供多平台直播与电商AI智能互动及数据采集解决方案，覆盖抖音、快手、小红书、视频号、百度、淘宝、京东等主流平台，支持直播间AI评论回复、店铺AI客服自动应答，并实时采集各平台直播大屏数据看板核心数据，助力直播运营智能化与数据实时监控。",
   "author": "Smart Customer Service Team",
   "icons": {
-    "16": "icon16.png",
-    "48": "icon48.png",
-    "128": "icon128.png"
+    "64": "icons/icon64.png",
+    "128": "icons/icon128.png"
   },
   "content_scripts": [
     {
+      "all_frames": true,
+      "css": [
+        "ui/css/layui.css"
+      ],
+      "js": [
+        "ui/layui.js",
+        "ui/functions.js",
+        "ui/coze.js",
+        "ui/dialog.js",
+        "ui/content.js"
+      ],
+      "match_about_blank": true,
       "matches": [
-        "https://*.douyin.com/*",
-        "https://*.kuaishou.com/*",
+        "https://*.jinritemai.com/*",
+        "https://*.kwaixiaodian.com/*",
         "https://*.xiaohongshu.com/*",
-        "https://mp.weixin.qq.com/mp/*",
+        "https://*.weixin.qq.com/*",
         "https://*.baidu.com/*",
         "https://*.taobao.com/*",
-        "https://*.tmall.com/*",
         "https://*.jd.com/*",
         "https://*.tiktok.com/*"
       ],
-      "js": ["main.js"],
-      "css": [],
-      "run_at": "document_end",
-      "all_frames": false
+      "run_at": "document_end"
     }
   ],
   "web_accessible_resources": [
     {
       "resources": [
-        "main.js",
-        "dashboard/*",
-        "icon16.png",
-        "icon48.png",
-        "icon128.png"
+        "ui/font/*"
       ],
       "matches": [
-        "https://*/*",
-        "http://*/*"
+        "https://*.jinritemai.com/*",
+        "https://*.kwaixiaodian.com/*",
+        "https://*.xiaohongshu.com/*",
+        "https://*.weixin.qq.com/*",
+        "https://*.baidu.com/*",
+        "https://*.taobao.com/*",
+        "https://*.jd.com/*",
+        "https://*.tiktok.com/*"
       ]
     }
   ],
   "permissions": [
+    "webRequest",
+    "debugger",
+    "webNavigation",
+    "activeTab",
+    "scripting",
+    "clipboardRead",
+    "clipboardWrite",
     "storage",
-    "activeTab"
+    "tabs",
+    "cookies",
+    "downloads",
+    "management",
+    "nativeMessaging"
   ],
   "host_permissions": [
-    "https://*.douyin.com/*",
-    "https://*.kuaishou.com/*",
+    "https://*.jinritemai.com/*",
+    "https://*.kwaixiaodian.com/*",
     "https://*.xiaohongshu.com/*",
-    "https://mp.weixin.qq.com/*",
+    "https://*.weixin.qq.com/*",
     "https://*.baidu.com/*",
     "https://*.taobao.com/*",
     "https://*.jd.com/*",
     "https://*.tiktok.com/*",
-    "https://api.coze.com/*",
+    "https://api.coze.cn/*",
     "https://api.openai.com/*"
   ],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "ui/background.js"
   },
   "action": {
-    "default_popup": "dashboard/index.html",
-    "default_title": "智能客服控制台"
+    "default_popup": "ui/popup.html",
+    "default_title": "智能客服控制台",
+    "default_icon": {
+      "64": "icons/icon64.png",
+      "128": "icons/icon128.png"
+    }
   },
-  "options_page": "dashboard/options.html",
+  "options_page": "dashboard/index.html",
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'"
+    "extension_pages": "script-src 'self'; object-src 'self'; worker-src 'self';"
   }
 }
