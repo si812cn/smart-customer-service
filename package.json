@@ -2,8 +2,10 @@
   "name": "smart-customer-service",
   "version": "1.0.0",
   "description": "智能客服系统 - 支持抖音、快手、小红书、淘宝、京东、百度、视频号、TikTok",
-  "main": "dist/main.js",
+  "main": "main.js",
+  "type": "module",
   "scripts": {
+    "start": "node main.js",
     "dev": "tsc -w",
     "build": "npm run clean && npm run compile && npm run zip",
     "compile": "tsc",

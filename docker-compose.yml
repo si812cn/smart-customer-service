@@ -15,7 +15,7 @@ services:
       - smart-cs-network
 
   # 可扩展：AI 网关服务（未来）
-  # ai-gateway:
+  # services-gateway:
   #   image: coze-proxy:latest
   #   ports:
   #     - "3001:3000"

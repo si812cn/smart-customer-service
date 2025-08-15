@@ -1,13 +1,15 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh">
 <head>
     <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <title>智能客服控制台</title>
-    <link rel="stylesheet" type="text/css" href="css/layui.css" />
+    <link rel="stylesheet" type="text/css" href="ui/css/layui.css" />
     <style>
         * {
             margin: 0;
             padding: 0;
+            box-sizing: border-box;
             font-family: "Microsoft YaHei", sans-serif;
         }
         .box {
@@ -84,7 +86,6 @@
         .version b {
             color: #1e88e5;
         }
-        /* 新增：反馈提示 */
         .feedback {
             margin-top: 12px;
             padding: 8px 12px;
@@ -104,7 +105,6 @@
             color: #f5222d;
             border: 1px solid #f5222d;
         }
-        /* 按钮组布局 */
         .btn-group {
             margin: 10px 0;
         }
@@ -113,7 +113,7 @@
 <body>
 <div class="box">
     <div class="mainTitle">
-        <img src="../icons/icon128.png" alt="插件图标" />
+        <img src="icons/icon128.png" alt="插件图标" />
         <h1>智能客服插件</h1>
     </div>
 
@@ -140,79 +140,7 @@
     </div>
 </div>
 
-<!-- ✅ 内联脚本（也可外联，但需确保加载顺序） -->
-<script>
-    (() => {
-        // 工具函数：获取当前标签页
-        function getCurrentTab() {
-            return new Promise((resolve) => {
-                chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-                    if (chrome.runtime.lastError) {
-                        console.error("Tab query error:", chrome.runtime.lastError);
-                        resolve(null);
-                    } else {
-                        resolve(tabs?.[0] || null);
-                    }
-                });
-            });
-        }
-
-        // 发送消息并反馈
-        function sendMessage(tabId, message) {
-            chrome.tabs.sendMessage(tabId, message, (response) => {
-                if (chrome.runtime.lastError) {
-                    console.error("Message send failed:", chrome.runtime.lastError.message);
-                    showFeedback("发送失败，请刷新页面重试", "error");
-                } else {
-                    showFeedback("指令已发送", "success");
-                }
-            });
-        }
-
-        // 显示反馈
-        function showFeedback(msg, type = 'info') {
-            const el = document.getElementById('feedback');
-            if (!el) return;
-            el.textContent = msg;
-            el.className = `feedback ${type}`;
-            el.style.opacity = 1;
-            setTimeout(() => { el.style.opacity = 0; }, 2000);
-        }
-
-        // 按钮事件绑定
-        const buttons = {
-            start: { type: "showConfigHtml" },
-            test: { type: "showTestDialog" },
-            copyCookie: { type: "copyCookie" },
-            networkCatch: { type: "networkCatch" }
-        };
-
-        for (const [id, message] of Object.entries(buttons)) {
-            const btn = document.getElementById(id);
-            if (!btn) continue;
-
-            btn.addEventListener('click', async function () {
-                const originalText = btn.textContent;
-                btn.disabled = true;
-                btn.textContent = '发送中...';
-
-                const tab = await getCurrentTab();
-                if (!tab) {
-                    showFeedback("无法获取当前页面，请刷新后重试", "error");
-                    btn.disabled = false;
-                    btn.textContent = originalText;
-                    return;
-                }
-
-                sendMessage(tab.id, { ...message, tabId: tab.id });
-
-                setTimeout(() => {
-                    btn.disabled = false;
-                    btn.textContent = originalText;
-                }, 1000);
-            });
-        }
-    })();
-</script>
+<!-- ✅ 外部 JS 文件 -->
+<script src="popup.js"></script>
 </body>
 </html>

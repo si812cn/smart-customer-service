@@ -1,160 +1,97 @@
-// ==UserScript==
-// @name         直播AI助手 - 多平台智能回复（生产版）
-// @namespace    http://tampermonkey.net/
-// @version      2.0
-// @description  支持抖音、快手、淘宝、京东、小红书、视频号、百度、TikTok 的B端直播后台AI智能回复，含评论监听、缓存、过滤、防冲突
-// @author       您的品牌
-// @match        https://buyin.jinritemai.com/*
-// @match        https://zs.kwaixiaodian.com/*
-// @match        https://ark.xiaohongshu.com/*
-// @match        https://channels.weixin.qq.com/*
-// @match        https://cecom.baidu.com/*
-// @match        https://jlive.jd.com/*
-// @match        https://liveplatform.taobao.com/*
-// @match        https://seller.tiktok.com/*
-// @grant        GM_xmlhttpRequest
-// @grant        GM_setValue
-// @grant        GM_getValue
-// @grant        GM_registerMenuCommand
-// @connect      api.your-ai-service.com
-// @require      https://cdn.jsdelivr.net/npm/marked/marked.min.js
-// @run-at       document-end
-// ==/UserScript==
+// content.js
+// 直播AI助手 - 页面注入脚本
+// 职责：监听页面评论 → 请求AI回复 → 填入输入框 → 自动发送
+// 作者：Qwen
+// 日期：2025-08-14
 
 (function () {
     'use strict';
 
     /**
-     * ==================== 配置管理 ====================
+     * 全局配置对象
+     * 所有可调参数集中管理，便于后期通过 popup 扩展配置
      */
     const Config = {
-        // AI服务配置
-        AI: {
-            apiUrl: 'https://api.your-ai-service.com/v1/chat/completions',
-            apiKey: '',
-            model: 'gpt-4o-mini',
-            temperature: 0.7,
-            maxTokens: 60,
-            timeout: 10000
-        },
-
-        // 回复策略
         REPLY: {
-            cooldown: 3000,        // 同一用户最小间隔（ms）
-            maxPerMinute: 20,      // 每分钟最多回复数
-            maxLength: 30,         // 最大字数
-            autoSend: true         // 是否自动发送
+            // 用户级冷却时间（毫秒）：同一用户3秒内不重复回复
+            cooldown: 3000,
+            // 每分钟最多自动回复条数，防止被平台限流
+            maxPerMinute: 20,
+            // 回复内容最大长度（字符）
+            maxLength: 30,
+            // 是否开启自动发送（false 则只填入不发送）
+            autoSend: true
         },
-
-        // 过滤规则
         FILTER: {
-            blockedKeywords: ['刷单', '加V', '微信', 'qq', 'vx', 'telegram', 'tg', '返现', '代运营'],
-            blockedUsers: [],      // 可通过后台配置
-            allowList: []          // 白名单（如管理员）
-        },
-
-        // 缓存
-        CACHE_TTL: 5 * 60 * 1000   // 5分钟
+            // 屏蔽关键词列表：包含这些词的评论将被忽略
+            blockedKeywords: [
+                '刷单', '加V', '微信', 'qq', 'vx',
+                'telegram', 'tg', '返现', '代运营'
+            ]
+        }
     };
 
     /**
-     * ==================== 工具函数 ====================
+     * 工具类：通用方法封装
      */
     const Utils = {
-        // 获取时间戳
+        /**
+         * 获取当前时间戳
+         * @returns {number} 当前时间毫秒值
+         */
         now() { return Date.now(); },
 
-        // 深拷贝
-        deepClone(obj) { return JSON.parse(JSON.stringify(obj)); },
-
-        // 获取平台
+        /**
+         * 根据当前页面 URL 判断所属直播平台
+         * @returns {string} 平台标识（如 douyin, kuaishou）
+         */
         getPlatform() {
             const host = location.host;
-            if (host === 'buyin.jinritemai.com') return 'douyin';
-            if (host === 'zs.kwaixiaodian.com') return 'kuaishou';
-            if (host === 'ark.xiaohongshu.com') return 'xiaohongshu';
-            if (host === 'channels.weixin.qq.com') return 'shipinhao';
-            if (host === 'cecom.baidu.com') return 'baidu';
-            if (host === 'jlive.jd.com') return 'jingdong';
-            if (host === 'liveplatform.taobao.com') return 'taobao';
-            if (host === 'seller.tiktok.com') return 'tiktok';
+            if (host.includes('jinritemai')) return 'douyin';
+            if (host.includes('kwaixiaodian')) return 'kuaishou';
+            if (host.includes('xiaohongshu')) return 'xiaohongshu';
+            if (host.includes('weixin')) return 'shipinhao';
+            if (host.includes('baidu')) return 'baidu';
+            if (host.includes('jd')) return 'jingdong';
+            if (host.includes('taobao')) return 'taobao';
+            if (host.includes('tiktok')) return 'tiktok';
             return 'unknown';
-        },
-
-        // 本地存储封装
-        async getStorage(key, def = null) {
-            return await GM_getValue(key, def);
-        },
-        async setStorage(key, val) {
-            await GM_setValue(key, val);
         }
     };
 
     /**
-     * ==================== XPath 工具 ====================
-     */
-    const XPathUtil = {
-        query(xpath, ctx = document) {
-            try {
-                return document.evaluate(xpath, ctx, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-            } catch (e) {
-                console.warn('[XPath] 查询失败:', xpath, e);
-                return null;
-            }
-        },
-
-        queryAll(xpath, ctx = document) {
-            const res = [];
-            try {
-                const iter = document.evaluate(xpath, ctx, null, XPathResult.ORDERED_NODE_ITERATOR_TYPE, null);
-                let node;
-                while ((node = iter.iterateNext())) res.push(node);
-            } catch (e) {
-                console.warn('[XPath] 批量查询失败:', xpath, e);
-            }
-            return res;
-        },
-
-        waitFor(xpath, cb, retries = 60, interval = 500) {
-            const el = this.query(xpath);
-            if (el) cb(el);
-            else if (retries > 0) setTimeout(() => this.waitFor(xpath, cb, retries - 1, interval), interval);
-            else console.warn('[XPath] 元素未找到:', xpath);
-        }
-    };
-
-    /**
-     * ==================== 平台选择器 ====================
+     * 各平台关键元素的 XPath 选择器
+     * 支持多路径（用 | 分隔）作为回退机制
      */
     const SELECTORS = {
         INPUT: {
             douyin: '//textarea[@class="webcast-chatroom___textarea"]',
-            kuaishou: '//div[contains(@class,"comment-input")]/textarea',
+            kuaishou: '//textarea[contains(@class,"comment-input")]',
             xiaohongshu: '//textarea[contains(@class,"d-text")]',
-            shipinhao: '//textarea[@class="message-input" and @placeholder="说点什么..."]',
-            baidu: '//input[@id="input" and @placeholder="输入评论"]',
-            taobao: '//textarea[@placeholder="回复观众或直接enter发评论，输入/可快捷回复"]',
-            jingdong: '//textarea[contains(@class,"textArea") and @maxlength="500"]',
-            tiktok: '//div[@contenteditable="plaintext-only"]',
+            shipinhao: '//textarea[@class="message-input"]',
+            baidu: '//input[@id="input"]',
+            taobao: '//textarea[@placeholder="回复观众"]',
+            jingdong: '//textarea[contains(@class,"textArea")]',
+            tiktok: '//div[@contenteditable="plaintext-only"]'
         },
         SEND: {
-            douyin: '//button[@data-e2e="send-button"] | //span[text()="发送"]/ancestor::button',
-            kuaishou: '//button[contains(@class,"submit-button") or @role="button"]',
+            douyin: '//button[@data-e2e="send-button"]',
+            kuaishou: '//button[contains(@class,"submit-button")]',
             xiaohongshu: '//span[text()="发送"]/ancestor::button',
-            shipinhao: '//button[contains(@class,"send-btn")] | //*[@role="button" and .//span[text()="发送"]]',
-            baidu: '//button[.//text()="发送"] | //*[@role="button" and text()="发送"]',
-            taobao: '//button[@data-tblalog-d="AnchorReply__faBu"] | //span[text()="发布"]/ancestor::button',
-            jingdong: '//button[contains(@class, "ant-btn") and .//span[text()="发送"]]',
-            tiktok: '//button[@aria-label="Send message"] | //button[.//span[text()="Send"]]'
+            shipinhao: '//button[contains(@class,"send-btn")]',
+            baidu: '//button[.//text()="发送"]',
+            taobao: '//span[text()="发布"]/ancestor::button',
+            jingdong: '//button[.//span[text()="发送"]]',
+            tiktok: '//button[@aria-label="Send message"]'
         },
         COMMENT_LIST: {
             douyin: '//div[contains(@class,"comment-item")]',
-            kuaishou: '//div[@class="comment-list"]//div[@class="item"]',
+            kuaishou: '//div[@class="item"]',
             xiaohongshu: '//div[@class="comment-item"]',
             shipinhao: '//div[@class="comment-content"]',
             baidu: '//div[@class="comment-text"]',
-            jingdong: '//div[@class="comment-content"]',
             taobao: '//div[contains(@class,"comment-content")]',
+            jingdong: '//div[@class="comment-content"]',
             tiktok: '//div[@data-e2e="comment-item"]'
         },
         COMMENT_USER: {
@@ -163,8 +100,8 @@
             xiaohongshu: './/span[contains(@class,"username")]',
             shipinhao: './/span[contains(@class,"user-name")]',
             baidu: './/span[contains(@class,"user")]',
-            jingdong: './/span[contains(@class,"user-name")]',
             taobao: './/span[contains(@class,"user-nick")]',
+            jingdong: './/span[contains(@class,"user-name")]',
             tiktok: './/span[contains(@class,"user-name")]'
         },
         COMMENT_TEXT: {
@@ -173,222 +110,245 @@
             xiaohongshu: './/span[contains(@class,"content")]',
             shipinhao: './/span[contains(@class,"comment-text")]',
             baidu: './/span[contains(@class,"text")]',
-            jingdong: './/span[contains(@class,"content")]',
             taobao: './/span[contains(@class,"text")]',
+            jingdong: './/span[contains(@class,"content")]',
             tiktok: './/span[contains(@class,"comment-text")]'
         }
     };
 
     /**
-     * ==================== AI 服务 ====================
+     * XPath 工具类：封装查询与等待逻辑
      */
-    class AIReplyService {
-        constructor() {
-            this.cache = new Map();
-            this.loadConfig();
+    class XPathUtil {
+        /**
+         * 执行 XPath 查询，返回第一个匹配元素
+         * @param {string} xpath - XPath 表达式
+         * @param {Node} ctx - 查询上下文（默认 document）
+         * @returns {Element|null} 匹配的 DOM 元素或 null
+         */
+        static query(xpath, ctx = document) {
+            try {
+                return document.evaluate(xpath, ctx, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+            } catch (e) {
+                console.warn('[XPath] 查询失败:', xpath, e);
+                return null;
+            }
         }
 
-        async loadConfig() {
-            const savedKey = await Utils.getStorage('ai_api_key');
-            if (savedKey) Config.AI.apiKey = savedKey;
+        /**
+         * 等待元素出现（轮询机制）
+         * @param {string} xpath - 要等待的元素 XPath
+         * @param {Function} cb - 元素找到后的回调函数
+         * @param {number} retries - 最大重试次数
+         * @param {number} interval - 重试间隔（毫秒）
+         */
+        static waitFor(xpath, cb, retries = 60, interval = 500) {
+            const el = this.query(xpath);
+            if (el) {
+                cb(el);
+            } else if (retries > 0) {
+                setTimeout(() => this.waitFor(xpath, cb, retries - 1, interval), interval);
+            } else {
+                console.warn('[XPath] 元素未找到，放弃:', xpath);
+            }
         }
 
-        async generate(prompt) {
-            const cacheKey = this.getCacheKey(prompt);
-            const cached = this.getCache(cacheKey);
-            if (cached) return cached;
-
-            return new Promise((resolve, reject) => {
-                GM_xmlhttpRequest({
-                    method: 'POST',
-                    url: Config.AI.apiUrl,
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${Config.AI.apiKey}`
-                    },
-                    data: JSON.stringify({
-                        model: Config.AI.model,
-                        messages: [
-                            { role: 'system', content: '你是专业直播助手，回复要简短、热情、带1-2个emoji，口语化，30字内，不要用markdown。' },
-                            { role: 'user', content: prompt }
-                        ],
-                        temperature: Config.AI.temperature,
-                        max_tokens: Config.AI.maxTokens
-                    }),
-                    timeout: Config.AI.timeout,
-                    onload: (res) => {
-                        try {
-                            const data = JSON.parse(res.responseText);
-                            const reply = data.choices?.[0]?.message?.content || '';
-                            const clean = this.cleanReply(reply);
-                            this.setCache(cacheKey, clean);
-                            resolve(clean);
-                        } catch (e) {
-                            reject(new Error('AI解析失败: ' + e.message));
-                        }
-                    },
-                    onerror: (err) => reject(new Error('网络错误: ' + err.statusText)),
-                    ontimeout: () => reject(new Error('请求超时'))
-                });
-            });
-        }
-
-        cleanReply(text) {
-            return text
-                .replace(/[*_`~\[\]\(\)#\+\-!]/g, '')
-                .replace(/\s+/g, ' ')
-                .trim()
-                .slice(0, Config.REPLY.maxLength);
-        }
-
-        getCacheKey(text) {
-            return text.trim().toLowerCase().substring(0, 50);
-        }
-
-        getCache(key) {
-            const item = this.cache.get(key);
-            if (!item) return null;
-            return Utils.now() - item.ts < Config.CACHE_TTL ? item.value : null;
-        }
-
-        setCache(key, value) {
-            this.cache.set(key, { value, ts: Utils.now() });
+        /**
+         * 查询所有匹配 XPath 的元素
+         * @param {string} xpath - XPath 表达式
+         * @param {Node} ctx - 上下文
+         * @returns {Element[]} 元素数组
+         */
+        static queryAll(xpath, ctx = document) {
+            const res = [];
+            try {
+                const iter = document.evaluate(xpath, ctx, null, XPathResult.ORDERED_NODE_ITERATOR_TYPE, null);
+                let node;
+                while ((node = iter.iterateNext())) res.push(node);
+            } catch (e) {
+                console.warn('[XPath] queryAll 失败:', xpath, e);
+            }
+            return res;
         }
     }
 
     /**
-     * ==================== 评论监听器 ====================
+     * 评论监听器：使用 MutationObserver 捕获新评论
      */
     class CommentObserver {
+        /**
+         * @param {Function} onNewComment - 新评论回调函数
+         */
         constructor(onNewComment) {
             this.onNewComment = onNewComment;
-            this.seenComments = new Set();
+            this.seenComments = new Set(); // 已处理评论去重
             this.start();
         }
 
+        /**
+         * 启动监听
+         */
         start() {
-            const listXpath = SELECTORS.COMMENT_LIST[Utils.getPlatform()];
-            if (!listXpath) return console.warn('不支持的平台评论监听');
+            const platform = Utils.getPlatform();
+            const listXpath = SELECTORS.COMMENT_LIST[platform];
+            if (!listXpath) {
+                console.warn('[CommentObserver] 不支持的平台:', platform);
+                return;
+            }
 
-            const observer = new MutationObserver(() => {
-                this.extractNewComments();
-            });
+            // 使用 MutationObserver 监听评论区变化
+            const observer = new MutationObserver(() => this.extractNewComments());
 
+            // 等待评论列表出现
             XPathUtil.waitFor(listXpath.split('|')[0], (listEl) => {
                 if (listEl) {
                     observer.observe(listEl, { childList: true, subtree: true });
-                    console.log('[评论监听] 已启动');
+                    console.log('[CommentObserver] 已监听评论区');
                 }
             });
         }
 
+        /**
+         * 提取新评论并触发回调
+         */
         extractNewComments() {
             const platform = Utils.getPlatform();
             const items = XPathUtil.queryAll(SELECTORS.COMMENT_LIST[platform]);
+
             items.forEach(item => {
                 const userEl = XPathUtil.query(SELECTORS.COMMENT_USER[platform], item);
                 const textEl = XPathUtil.query(SELECTORS.COMMENT_TEXT[platform], item);
+
                 if (!userEl || !textEl) return;
 
                 const user = userEl.textContent.trim();
                 const text = textEl.textContent.trim();
-                const id = `${user}:${text}`;
+                const id = `${user}:${text}`; // 唯一标识
 
+                // 去重：避免重复处理
                 if (!this.seenComments.has(id)) {
                     this.seenComments.add(id);
-                    this.onNewComment({ user, text, timestamp: Utils.now() });
+                    this.onNewComment({
+                        user,
+                        text,
+                        timestamp: Utils.now()
+                    });
                 }
             });
         }
     }
 
     /**
-     * ==================== 主助手 ====================
+     * 直播助手主类
      */
     class LiveAssistant {
         constructor() {
             this.platform = Utils.getPlatform();
-            this.ai = new AIReplyService();
             this.inputSelector = SELECTORS.INPUT[this.platform];
             this.sendSelector = SELECTORS.SEND[this.platform];
-            this.isProcessing = false;
-            this.replyCount = 0;
-            this.lastReplyTime = 0;
-            this.userCooldown = new Map(); // user -> timestamp
+            this.isProcessing = false;        // 防并发锁
+            this.replyCount = 0;              // 当前分钟已回复数
+            this.lastReplyTime = 0;           // 上次回复时间
+            this.userCooldown = new Map();    // 用户冷却时间表
             this.init();
         }
 
-        async init() {
+        /**
+         * 初始化：启动监听器，绑定事件
+         */
+        init() {
             if (this.platform === 'unknown') {
-                console.warn('不支持的平台:', location.host);
+                console.warn('[LiveAssistant] 不支持的平台:', location.host);
                 return;
             }
-
-            // 加载配置
-            const autoEnable = await Utils.getStorage('auto_enable', true);
-            if (!autoEnable) return;
-
-            console.log(`[直播助手] 启动 - 平台: ${this.platform}`);
 
             // 启动评论监听
             new CommentObserver((comment) => this.handleComment(comment));
 
-            // 防止手动输入时被覆盖
-            document.addEventListener('focusin', (e) => {
-                if (XPathUtil.query(this.inputSelector, e.target)) {
-                    this.isProcessing = true; // 暂停自动回复
-                }
+            // 防冲突：用户手动输入时暂停自动回复
+            document.addEventListener('focusin', () => {
+                this.isProcessing = true;
+            });
+            document.addEventListener('focusout', () => {
+                setTimeout(() => this.isProcessing = false, 1000);
             });
 
-            document.addEventListener('focusout', (e) => {
-                if (XPathUtil.query(this.inputSelector, e.target)) {
-                    setTimeout(() => { this.isProcessing = false; }, 1000);
-                }
-            });
+            console.log(`[LiveAssistant] 已启动，平台: ${this.platform}`);
         }
 
+        /**
+         * 处理新评论
+         * @param {Object} comment - 评论对象 { user, text }
+         */
         async handleComment(comment) {
-            // 1. 基础过滤
-            if (this.isFiltered(comment.text)) return;
+            // 条件检查：过滤 + 冷却 + 并发锁
+            if (this.isFiltered(comment.text)) {
+                console.debug('[过滤] 忽略评论:', comment.text);
+                return;
+            }
+            if (this.isProcessing) {
+                console.debug('[并发] 正在处理中，跳过:', comment.text);
+                return;
+            }
+            if (!this.canReplyNow(comment.user)) {
+                console.debug('[频率] 超出限制，跳过:', comment.user);
+                return;
+            }
 
-            // 2. 频率控制
-            if (!this.canReplyNow(comment.user)) return;
-
-            if (this.isProcessing) return;
             this.isProcessing = true;
 
             try {
-                const prompt = `回复观众「${comment.text}」：`;
-                const reply = await this.ai.generate(prompt);
-                if (!reply) throw new Error('AI未返回');
+                // 向 background.js 请求 AI 回复
+                const response = await chrome.runtime.sendMessage({
+                    type: 'GENERATE_REPLY',
+                    prompt: `观众说：“${comment.text}”，请热情回复，30字内，带1个emoji`
+                });
 
-                await this.insertReply(reply);
-                if (Config.REPLY.autoSend) {
-                    await this.sendReply();
+                if (response?.reply) {
+                    // 清理回复内容
+                    const clean = response.reply.trim().slice(0, Config.REPLY.maxLength);
+                    await this.insertReply(clean);
+                    if (Config.REPLY.autoSend) {
+                        await this.sendReply();
+                    }
+                    this.updateStats(comment.user);
+                    console.log('[AI回复已发送]', clean);
                 }
-
-                this.updateStats(comment.user);
-            } catch (error) {
-                console.error('[回复失败]', error.message);
+            } catch (err) {
+                console.error('[AI回复失败]', err.message || err);
             } finally {
                 this.isProcessing = false;
             }
         }
 
+        /**
+         * 检查是否应过滤该评论
+         * @param {string} text - 评论文本
+         * @returns {boolean} 是否过滤
+         */
         isFiltered(text) {
             const lower = text.toLowerCase();
             return Config.FILTER.blockedKeywords.some(kw => lower.includes(kw));
         }
 
+        /**
+         * 检查是否可以回复（频率控制）
+         * @param {string} user - 用户名
+         * @returns {boolean} 是否允许回复
+         */
         canReplyNow(user) {
             const now = Utils.now();
             const last = this.userCooldown.get(user) || 0;
             const onCooldown = now - last < Config.REPLY.cooldown;
-            const rateLimited = this.replyCount >= Config.REPLY.maxPerMinute && (now - this.lastReplyTime) < 60000;
-
+            const rateLimited = this.replyCount >= Config.REPLY.maxPerMinute &&
+                (now - this.lastReplyTime) < 60000;
             return !onCooldown && !rateLimited;
         }
 
+        /**
+         * 更新统计信息（冷却、计数）
+         * @param {string} user - 用户名
+         */
         updateStats(user) {
             this.userCooldown.set(user, Utils.now());
             this.replyCount++;
@@ -398,30 +358,46 @@
             }
         }
 
+        /**
+         * 将回复内容填入输入框
+         * @param {string} text - 要填入的文本
+         * @returns {Promise<void>}
+         */
         async insertReply(text) {
             return new Promise(resolve => {
                 XPathUtil.waitFor(this.inputSelector, (inputEl) => {
-                    if (!inputEl) return resolve();
-
-                    if (inputEl.tagName === 'TEXTAREA' || inputEl.tagName === 'INPUT') {
-                        inputEl.value = text;
-                        inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-                    } else if (inputEl.isContentEditable) {
-                        inputEl.textContent = text;
-                        inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+                    if (!inputEl) {
+                        console.warn('[输入框] 未找到，跳过');
+                        return resolve();
                     }
+
+                    // 支持两种输入框类型：value 和 contenteditable
+                    if (inputEl.value !== undefined) {
+                        inputEl.value = text;
+                    } else if (inputEl.textContent !== undefined) {
+                        inputEl.textContent = text;
+                    }
+
+                    // 触发输入事件，通知前端框架
+                    inputEl.dispatchEvent(new Event('input', { bubbles: true }));
                     setTimeout(resolve, 300);
                 });
             });
         }
 
+        /**
+         * 点击发送按钮
+         * @returns {Promise<void>}
+         */
         async sendReply() {
             return new Promise(resolve => {
                 XPathUtil.waitFor(this.sendSelector, (btn) => {
                     if (btn && !btn.disabled) {
                         btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
                         btn.click();
-                        console.log('[已发送]');
+                        console.log('[发送] 按钮已点击');
+                    } else {
+                        console.warn('[发送] 按钮不可用或未找到');
                     }
                     setTimeout(resolve, 500);
                 });
@@ -429,29 +405,9 @@
         }
     }
 
-    /**
-     * ==================== 启动 ====================
-     */
-    function init() {
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', start);
-        } else {
-            start();
-        }
-    }
-
-    function start() {
-        setTimeout(() => {
-            new LiveAssistant();
-        }, 1000);
-    }
-
-    // 菜单命令
-    if (typeof GM_registerMenuCommand !== 'undefined') {
-        GM_registerMenuCommand('启动直播助手', start, 'A');
-    }
-
-    // 启动
-    init();
+    // ========================
+    // 启动主程序
+    // ========================
+    new LiveAssistant();
 
 })();

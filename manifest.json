@@ -16,10 +16,18 @@
       ],
       "js": [
         "ui/layui.js",
-        "ui/functions.js",
-        "ui/coze.js",
-        "ui/dialog.js",
-        "ui/content.js"
+        "popup.js",
+        "ui/utils/index.js",
+        "ui/services/AIProvider.js",
+        "ui/services/cozeProvider.js",
+        "ui/services/openaiProvider.js",
+        "ui/handlers/config.js",
+        "ui/handlers/ai.js",
+        "ui/middleware/auth.js",
+        "ui/middleware/auth.js",
+        "ui/middleware/logging.js",
+        "ui/middleware/index.js",
+        "background.js"
       ],
       "match_about_blank": true,
       "matches": [
@@ -80,10 +88,11 @@
     "https://api.openai.com/*"
   ],
   "background": {
-    "service_worker": "ui/background.js"
+    "service_worker": "background.js",
+    "type": "module"
   },
   "action": {
-    "default_popup": "ui/popup.html",
+    "default_popup": "popup.html",
     "default_title": "智能客服控制台",
     "default_icon": {
       "64": "icons/icon64.png",

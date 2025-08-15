@@ -99,6 +99,15 @@ document.addEventListener('DOMContentLoaded', function () {
                 return;
             }
 
+            // ✅ 4. 根据 type 处理特殊逻辑
+            if (message.type === "showTestDialog") {
+                // 直接调用 background.js 的 callAI 方法
+                await sendMessageToBackground({ type: 'callAI', content: '103斤穿几码', nickname: 'testUserId' });
+                showFeedback("AI 调用请求已发送", "success");
+
+                return;
+            }
+
             sendMessage(tab.id, { ...message, tabId: tab.id });
 
             // 恢复按钮
@@ -106,6 +115,22 @@ document.addEventListener('DOMContentLoaded', function () {
                 btn.disabled = false;
                 btn.textContent = originalText;
             }, 1000);
+        });
+    }
+
+    /**
+     * 发送消息到 background.js
+     */
+    function sendMessageToBackground(message) {
+        return new Promise((resolve) => {
+            chrome.runtime.sendMessage(message, (response) => {
+                if (chrome.runtime.lastError) {
+                    console.error("消息发送到 background.js 失败:", chrome.runtime.lastError.message);
+                    resolve(false);
+                } else {
+                    resolve(response);
+                }
+            });
         });
     }
 });
