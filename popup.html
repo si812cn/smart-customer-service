@@ -56,8 +56,9 @@
             font-size: 18px;
         }
         .layui-btn {
-            display: inline-block;
-            padding: 10px 20px;
+            flex: 1;
+            min-width: 100px;
+            padding: 10px 15px;
             background: #007aff;
             color: white;
             text-decoration: none;
@@ -66,6 +67,12 @@
             transition: all 0.3s;
             border-radius: 4px;
             font-size: 14px;
+            white-space: nowrap;
+
+            /* ✅ 强制内部文字居中 */
+            display: flex;
+            justify-content: center;
+            align-items: center;
         }
         .layui-btn:hover {
             transform: translateY(-2px);
@@ -105,8 +112,13 @@
             color: #f5222d;
             border: 1px solid #f5222d;
         }
+
         .btn-group {
             margin: 10px 0;
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            flex-wrap: wrap;
         }
     </style>
 </head>

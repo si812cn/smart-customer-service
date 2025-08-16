@@ -1,8 +1,10 @@
-// content.js
-// 直播AI助手 - 页面注入脚本
-// 职责：监听页面评论 → 请求AI回复 → 填入输入框 → 自动发送
+// ===========================================
+// 🎯 直播AI助手 - 页面注入脚本 (content.js)
+// 功能：监听页面评论 → 请求AI回复 → 填入输入框 → 自动发送
 // 作者：Qwen
 // 日期：2025-08-14
+// 更新：2025-08-16 - 流程优化与结构清晰化
+// ===========================================
 
 (function () {
     'use strict';
@@ -56,6 +58,31 @@
             if (host.includes('taobao')) return 'taobao';
             if (host.includes('tiktok')) return 'tiktok';
             return 'unknown';
+        },
+        /**
+         * 规范化字符串（用于生成安全的 key）
+         * @param {string} str - 原始字符串
+         * @param {number} maxLength - 最大长度
+         * @returns {string} 规范化后的字符串
+         */
+        normalize(str, maxLength = 32) {
+            return String(str)
+                .replace(/:/g, '：')                    // 冒号 → 全角
+                .replace(/\s+/g, '_')                   // 空白 → 下划线
+                .replace(/[^a-zA-Z0-9\u4e00-\u9fa5\-_.：]/g, '') // 白名单
+                .substring(0, maxLength)
+                .toLowerCase();
+        },
+        /**
+         * 创建评论唯一键（用于去重）
+         * @param {string} user - 用户名
+         * @param {string} text - 评论内容
+         * @returns {string} 唯一键，格式：comment:user:text
+         */
+        createCommentKey(user, text) {
+            const safeUser = this.normalize(user);
+            const safeText = this.normalize(text, 20); // 文本适当缩短
+            return `comment:${safeUser}:${safeText}`;
         }
     };
 
@@ -190,20 +217,26 @@
          */
         start() {
             const platform = Utils.getPlatform();
-            const listXpath = SELECTORS.COMMENT_LIST[platform];
-            if (!listXpath) {
+            const listSelector = SELECTORS.COMMENT_LIST[platform];
+
+            if (!listSelector) {
                 console.warn('[CommentObserver] 不支持的平台:', platform);
                 return;
             }
 
-            // 使用 MutationObserver 监听评论区变化
-            const observer = new MutationObserver(() => this.extractNewComments());
+            const observer = new MutationObserver(() => {
+                this.extractNewComments(); // 统一方法名
+            });
 
-            // 等待评论列表出现
-            XPathUtil.waitFor(listXpath.split('|')[0], (listEl) => {
-                if (listEl) {
-                    observer.observe(listEl, { childList: true, subtree: true });
+            XPathUtil.waitFor(listSelector, (container) => {
+                if (container) {
+                    // 监听父元素，提高稳定性
+                    const parent = container.parentElement || document.body;
+                    observer.observe(parent, { childList: true, subtree: true });
                     console.log('[CommentObserver] 已监听评论区');
+
+                    // 初次检查已有评论
+                    this.extractNewComments();
                 }
             });
         }
@@ -223,7 +256,7 @@
 
                 const user = userEl.textContent.trim();
                 const text = textEl.textContent.trim();
-                const id = `${user}:${text}`; // 唯一标识
+                const id = Utils.createCommentKey(user, text);
 
                 // 去重：避免重复处理
                 if (!this.seenComments.has(id)) {
@@ -243,6 +276,7 @@
      */
     class LiveAssistant {
         constructor() {
+            console.log("start liveassistant!");
             this.platform = Utils.getPlatform();
             this.inputSelector = SELECTORS.INPUT[this.platform];
             this.sendSelector = SELECTORS.SEND[this.platform];
@@ -250,6 +284,9 @@
             this.replyCount = 0;              // 当前分钟已回复数
             this.lastReplyTime = 0;           // 上次回复时间
             this.userCooldown = new Map();    // 用户冷却时间表
+            console.log(this.platform);
+            console.log(this.inputSelector);
+            console.log(this.sendSelector);
             this.init();
         }
 
@@ -300,8 +337,9 @@
             try {
                 // 向 background.js 请求 AI 回复
                 const response = await chrome.runtime.sendMessage({
-                    type: 'GENERATE_REPLY',
-                    prompt: `观众说：“${comment.text}”，请热情回复，30字内，带1个emoji`
+                    type: 'callAI',
+                    content: '${comment.text}',
+                    nickname: '${comment.user}'
                 });
 
                 if (response?.reply) {
@@ -338,7 +376,8 @@
          */
         canReplyNow(user) {
             const now = Utils.now();
-            const last = this.userCooldown.get(user) || 0;
+            const safeUser = Utils.normalize(user);
+            const last = this.userCooldown.get(safeUser) || 0;
             const onCooldown = now - last < Config.REPLY.cooldown;
             const rateLimited = this.replyCount >= Config.REPLY.maxPerMinute &&
                 (now - this.lastReplyTime) < 60000;
@@ -350,7 +389,8 @@
          * @param {string} user - 用户名
          */
         updateStats(user) {
-            this.userCooldown.set(user, Utils.now());
+            const safeUser = Utils.normalize(user);
+            this.userCooldown.set(safeUser, Utils.now());
             this.replyCount++;
             if (Utils.now() - this.lastReplyTime > 60000) {
                 this.replyCount = 1;
@@ -403,6 +443,183 @@
                 });
             });
         }
+    }
+
+    // ========================
+    // 新增功能：消息监听与扩展
+    // ========================
+
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+        console.log('[content.js] 收到来自 background 的消息:', message);
+
+        switch (message.type) {
+            case 'showConfigHtml':
+                showConfigPanel();
+                sendResponse({ success: true });
+                break;
+
+            case 'testAI':
+                console.log("enter testAI");
+                try {
+                    // 向 background.js 请求 AI 回复
+                    chrome.runtime.sendMessage(
+                        {
+                            type: 'callAI',
+                            content: '主播好看，我会不会不好看',
+                            nickname: 'testUserId'
+                        },
+                        (response) => {  // 👈 回调函数接收响应
+                            console.log('Received AI response:', response);
+
+                            if (chrome.runtime.lastError) {
+                                console.error('[AI通信失败]', chrome.runtime.lastError.message);
+                                sendResponse({ error: '[AI通信失败]' });
+                                return;
+                            }
+
+                            if (response?.reply) {
+                                const clean = response.reply.trim().slice(0, Config.REPLY.maxLength);
+                                console.log('[AI回复已发送]', clean);
+                                sendResponse({ success: true, msg: '[AI回复已发送]' });
+                            } else {
+                                console.log('[AI回复为空]');
+                                sendResponse({ error: '[AI回复为空]' });
+                            }
+                        }
+                    );
+                } catch (err) {
+                    console.error('[AI回复失败]', err.message || err);
+                    sendResponse({ error: '[AI回复失败]' });
+                }
+
+                break;
+
+            case 'copyCookie':
+                navigator.clipboard.writeText(document.cookie)
+                    .then(() => sendResponse({ success: true, msg: 'Cookie 已复制' }))
+                    .catch(err => sendResponse({ error: err.message }));
+                break;
+
+            case 'networkCatch':
+                startNetworkCapture();
+                sendResponse({ success: true, msg: '抓包已开启' });
+                break;
+
+            default:
+                console.warn('[content.js] 未知消息类型:', message.type);
+                sendResponse({ error: 'Unknown message type' });
+        }
+
+        return true; // 保持异步响应
+    });
+
+    /**
+     * 显示配置面板（浮动 UI）
+     */
+    function showConfigPanel() {
+        if (document.getElementById('live-assistant-config')) {
+            console.log('配置面板已存在，不再重复创建');
+            return;
+        }
+
+        const panel = document.createElement('div');
+        panel.id = 'live-assistant-config';
+        panel.style.cssText = `
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            width: 300px;
+            height: 400px;
+            background: white;
+            border: 1px solid #ccc;
+            box-shadow: 0 0 10px rgba(0,0,0,0.2);
+            z-index: 999999;
+            padding: 15px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            border-radius: 8px;
+            overflow: hidden;
+        `;
+
+        panel.innerHTML = `
+            <h3 style="margin-top: 0; color: #333;">直播助手配置</h3>
+            <div style="margin: 10px 0;">
+                <label><input type="checkbox" id="autoReply" ${Config.REPLY.autoSend ? 'checked' : ''}> 开启自动发送</label>
+            </div>
+            <div style="margin: 10px 0;">
+                <label>最大回复长度：</label>
+                <input type="number" id="maxLength" value="${Config.REPLY.maxLength}" min="10" max="100" style="width:60px">
+            </div>
+            <div style="margin: 10px 0;">
+                <label>屏蔽关键词：</label>
+                <textarea id="blockedKeywords" rows="3" style="width:100%">${Config.FILTER.blockedKeywords.join('\n')}</textarea>
+            </div>
+            <button id="saveBtn" 
+                    style="margin: 5px 10px 5px 0; padding: 5px 10px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                保存
+            </button>
+            <button id="closeBtn" 
+                    style="padding: 5px 10px; background: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                关闭
+            </button>
+        `;
+
+        document.body.appendChild(panel);
+
+        // 绑定事件
+        document.getElementById('closeBtn').onclick = () => panel.remove();
+        document.getElementById('saveBtn').onclick = () => {
+            // 更新 Config（注意：刷新后失效，需配合 storage）
+            Config.REPLY.autoSend = document.getElementById('autoReply').checked;
+            Config.REPLY.maxLength = parseInt(document.getElementById('maxLength').value);
+            const kwText = document.getElementById('blockedKeywords').value;
+            Config.FILTER.blockedKeywords = kwText.split('\n').map(k => k.trim()).filter(k => k);
+            alert('配置已保存（当前页面有效）');
+        };
+    }
+
+    /**
+     * 开启网络请求监听（抓包模式）
+     * 重写 fetch 和 XMLHttpRequest
+     */
+    function startNetworkCapture() {
+        console.log('【抓包模式】已开启，正在监听 fetch 和 XHR 请求...');
+
+        // 保存原始方法
+        const originalFetch = window.fetch;
+        const originalXHR = window.XMLHttpRequest;
+
+        // 重写 fetch
+        window.fetch = function (...args) {
+            console.log('🔍 捕获 fetch 请求:', args[0], args[1]);
+            return originalFetch(...args).then(response => {
+                console.log('📦 fetch 响应:', response.clone());
+                return response;
+            }).catch(err => {
+                console.error('❌ fetch 错误:', err);
+                throw err;
+            });
+        };
+
+        // 重写 XMLHttpRequest
+        const open = originalXHR.prototype.open;
+        const send = originalXHR.prototype.send;
+
+        originalXHR.prototype.open = function (method, url, ...args) {
+            this._url = url;
+            this._method = method;
+            return open.apply(this, [method, url, ...args]);
+        };
+
+        originalXHR.prototype.send = function (...args) {
+            this.addEventListener('load', function () {
+                console.log('🔍 捕获 XHR 请求:', this._method, this._url);
+                console.log('📦 XHR 响应:', this.responseText || this.response);
+            });
+            this.addEventListener('error', function () {
+                console.error('❌ XHR 请求失败:', this._method, this._url);
+            });
+            return send.apply(this, args);
+        };
     }
 
     // ========================

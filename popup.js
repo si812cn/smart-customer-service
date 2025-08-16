@@ -30,14 +30,19 @@ document.addEventListener('DOMContentLoaded', function () {
      * @param {number} tabId
      * @param {object} message
      */
-    function sendMessage(tabId, message) {
-        chrome.tabs.sendMessage(tabId, message, (response) => {
-            if (chrome.runtime.lastError) {
-                console.error("Message send failed:", chrome.runtime.lastError.message);
-                showFeedback("发送失败，请刷新页面重试", "error");
-            } else {
-                showFeedback("指令已发送", "success");
-            }
+    function sendMessage(message) {
+        return new Promise((resolve) => {
+            chrome.runtime.sendMessage(message, (response) => {
+                if (chrome.runtime.lastError) {
+                    console.error("消息发送失败:", chrome.runtime.lastError.message);
+                    showFeedback("发送失败: " + chrome.runtime.lastError.message, "error");
+                    resolve(false);
+                } else {
+                    console.log("收到响应:", response);
+                    showFeedback(response.success ? "操作成功" : (response.msg || "操作完成"), response.success ? "success" : "info");
+                    resolve(response);
+                }
+            });
         });
     }
 
@@ -76,7 +81,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const buttons = {
         start: { type: "showConfigHtml" },
-        test: { type: "showTestDialog" },
+        test: { type: "testAI" },
         copyCookie: { type: "copyCookie" },
         networkCatch: { type: "networkCatch" }
     };
@@ -99,38 +104,13 @@ document.addEventListener('DOMContentLoaded', function () {
                 return;
             }
 
-            // ✅ 4. 根据 type 处理特殊逻辑
-            if (message.type === "showTestDialog") {
-                // 直接调用 background.js 的 callAI 方法
-                await sendMessageToBackground({ type: 'callAI', content: '103斤穿几码', nickname: 'testUserId' });
-                showFeedback("AI 调用请求已发送", "success");
-
-                return;
-            }
-
-            sendMessage(tab.id, { ...message, tabId: tab.id });
+            const response = await sendMessage({ type: message.type }); // 不再传 tabId
 
             // 恢复按钮
             setTimeout(() => {
                 btn.disabled = false;
                 btn.textContent = originalText;
             }, 1000);
-        });
-    }
-
-    /**
-     * 发送消息到 background.js
-     */
-    function sendMessageToBackground(message) {
-        return new Promise((resolve) => {
-            chrome.runtime.sendMessage(message, (response) => {
-                if (chrome.runtime.lastError) {
-                    console.error("消息发送到 background.js 失败:", chrome.runtime.lastError.message);
-                    resolve(false);
-                } else {
-                    resolve(response);
-                }
-            });
         });
     }
 });

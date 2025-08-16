@@ -26,6 +26,8 @@ const messageHandler = createHandler()
  * 使用 async/await 以支持异步操作（如存储读取、API 调用）
  * 使用自定义的中间件式处理器（Handler Pipeline），根据消息类型分发到对应的处理函数
  * 支持日志记录、权限校验等横切关注点（cross-cutting concerns）
+ * 支持转发消息到 content.js
+ * 在 messageHandler 处理完 AI 请求后，增加转发逻辑
  *
  * @param {Object} request - 消息请求体，包含动作类型和数据
  * @param {Object} sender - 发送消息的上下文信息（标签页、帧等）
@@ -34,4 +36,40 @@ const messageHandler = createHandler()
  * 注意：由于使用了 async/await，必须返回 true 以保持 sendResponse 回调有效
  * 参见：https://developer.chrome.com/docs/extensions/mv3/messaging/#returning-responses-from-event-listeners
  */
-chrome.runtime.onMessage.addListener(messageHandler);
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+
+    // 如果不是 AI 请求，则尝试转发给 content.js
+    if (['showConfigHtml', 'testAI', 'copyCookie', 'networkCatch'].includes(message.type)) {
+        // 查找目标标签页
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            const tab = tabs[0];
+            if (!tab) {
+                sendResponse({ error: 'No active tab' });
+                return;
+            }
+
+            // 转发消息给 content.js
+            chrome.tabs.sendMessage(tab.id, message, (response) => {
+                if (chrome.runtime.lastError) {
+                    console.error('Forward failed:', chrome.runtime.lastError.message);
+                    sendResponse({ error: 'Content script not ready' });
+                } else {
+                    sendResponse(response);
+                }
+            });
+        });
+
+        return true; // 保持异步响应通道
+    }
+    else{
+        // 先让中间件处理器处理 AI 相关请求
+        const handledByHandler = messageHandler(message, sender, sendResponse);
+        if (handledByHandler) {
+            return true; // 已处理（如 callAI）
+        }
+    }
+
+    // 默认：未处理该消息 ===
+    console.log("Unhandled message type:", message.type);
+    return false;
+});

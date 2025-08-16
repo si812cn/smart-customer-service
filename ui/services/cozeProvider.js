@@ -1,4 +1,5 @@
 import { AIProvider } from './AIProvider.js';
+import { Utils } from '../utils/index.js';
 
 /**
  * Coze API 接口常量
@@ -46,23 +47,6 @@ class Coze {
     }
 
     /**
-     * 生成安全的 session key
-     * 格式：session:<botId>:<safeNickname>
-     */
-    createSessionKey(botId, nickname) {
-        // 1. 规范化 nickname：只保留安全字符
-        const safeNickname = String(nickname)
-            .replace(/:/g, '：')           // 冒号 → 全角，避免分隔符冲突
-            .replace(/\s+/g, '_')          // 多个空白 → 单下划线
-            .replace(/[^a-zA-Z0-9\u4e00-\u9fa5\-_.：]/g, '') // 白名单过滤
-            .substring(0, 32)              // 限制长度，平衡唯一性和内存
-            .toLowerCase();                // 统一大小写，避免大小写敏感问题
-
-        // 2. 拼接 key，使用 : 作为结构化分隔符
-        return `session:${botId}:${safeNickname}`;
-    }
-
-    /**
      * 为指定用户创建一个新的会话（若尚未存在）
      * @param {string} botId - 直播间主播ID
      * @param {string} nickname - 用户昵称
@@ -77,7 +61,7 @@ class Coze {
 
         const cleanUser = nickname.trim();
         // 使用 botId + user 生成 sessionKey（防止不同 bot 的会话冲突）
-        const sessionKey = this.createSessionKey(botId, nickname);
+        const sessionKey = Utils.createSessionKey(botId, nickname);
 
         // 2. 检查缓存
         const cachedId = this.conversations.get(sessionKey);
@@ -228,6 +212,8 @@ class Coze {
             const decoder = new TextDecoder("utf-8");
             let buffer = ""; // 用于拼接不完整的行
 
+            let isCompletedEvent = false; // 标记是否进入 completed 事件
+
             while (true) {
                 if (signal?.aborted) {
                     reader.cancel();
@@ -238,27 +224,44 @@ class Coze {
                 if (done) break;
 
                 buffer += decoder.decode(value, { stream: true });
-console.log(buffer);
+
                 const lines = buffer.split("\n");
                 buffer = lines.pop() || ""; // 保留未完整行
 
                 for (const line of lines) {
                     const trimmed = line.trim();
 
-                    // 检查事件类型
-                    if (trimmed === "event:conversation.message.delta") {
-                        continue; // 下一行是 data
+                    // === 处理事件类型 ===
+                    if (trimmed.startsWith("event:")) {
+                        const eventType = trimmed.slice(6).trim();
+                        if (eventType === "conversation.message.completed") {
+                            isCompletedEvent = true;
+                            // 不做任何拼接！避免重复
+                        } else if (eventType === "conversation.message.delta") {
+                            isCompletedEvent = false; // 重置
+                        }
+                        continue;// 下一行是 data
                     }
 
+                    // === 处理数据 ===
                     if (trimmed.startsWith("data:")) {
                         const jsonString = trimmed.slice(5).trim();
                         if (!jsonString || jsonString === "[DONE]") continue;
 
                         try {
                             const data = JSON.parse(jsonString);
-                            if (data.content_type === "text" && data.content) {
+
+                            // 只处理 delta 事件中的文本增量
+                            if (!isCompletedEvent && data.content_type === "text" && data.content) {
                                 result += data.content;
-                                onChunk?.(data.content); // 实时回调
+                                onChunk?.(data.content); // 实时返回增量内容
+                            }
+
+                            // 如果是 completed 事件，只取最终内容（可选：覆盖 result）
+                            if (isCompletedEvent && data.event === "conversation.message.completed") {
+                                // 可选：用 completed 的 content 覆盖 result（更准确）
+                                // 但通常 delta 已完整，可忽略
+                                console.log("【completed】完整响应已接收");
                             }
                         } catch (e) {
                             console.warn("解析 SSE 数据失败：", e, jsonString);
@@ -271,10 +274,19 @@ console.log(buffer);
             if (buffer.trim()) {
                 try {
                     const data = JSON.parse(buffer.trim());
-                    if (data.content_type === "text" && data.content) {
+
+                    // ✅ 只有在不是 completed 事件时，才处理 text 类型的增量
+                    if (!isCompletedEvent && data.content_type === "text" && data.content) {
                         result += data.content;
                         onChunk?.(data.content);
                     }
+
+                    // 如果是 completed 事件，不要拼接（避免重复）
+                    // 可以在这里做收尾日志
+                    if (isCompletedEvent && data.event === "conversation.message.completed") {
+                        console.log("【completed】最终消息已接收");
+                    }
+
                 } catch (e) {
                     console.warn("解析残留数据失败：", e, buffer);
                 }

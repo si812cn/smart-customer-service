@@ -24,12 +24,11 @@
         "ui/handlers/config.js",
         "ui/handlers/ai.js",
         "ui/middleware/auth.js",
-        "ui/middleware/auth.js",
         "ui/middleware/logging.js",
         "ui/middleware/index.js",
-        "background.js"
+        "background.js",
+        "content.js"
       ],
-      "match_about_blank": true,
       "matches": [
         "https://*.jinritemai.com/*",
         "https://*.kwaixiaodian.com/*",

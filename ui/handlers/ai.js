@@ -1,6 +1,6 @@
+import { Utils } from '../utils/index.js';
 import { CozeProvider } from '../services/cozeProvider.js';
 import { OpenAIProvider } from '../services/openaiProvider.js';
-import { sanitizeInput } from '../utils/index.js';
 
 /**
  * 处理 AI 回复请求
@@ -31,7 +31,7 @@ export const handleCallAI = async (request, sender) => {
             config.model="coze";
         }
 
-        const userContent = sanitizeInput(request.content);
+        const userContent = Utils.sanitizeInput(request.content);
         if (!userContent) {
             return { error: "评论内容不能为空" };
         }
@@ -50,7 +50,7 @@ export const handleCallAI = async (request, sender) => {
         // 构建最终发送给 AI 的完整提示词
         // sanitizeInput 是一个用于防止 prompt 注入的安全函数（需确保已定义）
         // 在此处，仅使用用户评论内容，不拼接模板（⚠️ 注意：此处逻辑可能存在问题，见下方说明）
-        const fullPrompt = `${sanitizeInput(request.content)}`.trim();
+        const fullPrompt = `${Utils.sanitizeInput(request.content)}`.trim();
 
         let providerInstance;
 
