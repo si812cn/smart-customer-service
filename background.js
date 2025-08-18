@@ -9,7 +9,20 @@ import { createHandler } from './ui/middleware/index.js';
 import { withLogging } from './ui/middleware/logging.js';
 import { withAuth } from './ui/middleware/auth.js'; // 可选
 import { handleCallAI } from './ui/handlers/ai.js';
+import { DEFAULT_CONFIG } from './ui/handlers/config.js';
+import { handleGetConfig } from './ui/handlers/config.js';
 import { handleSaveConfig } from './ui/handlers/config.js';
+
+// 初始化：如果 storage 没有配置，写入默认值
+chrome.runtime.onInstalled.addListener(() => {
+    chrome.storage.local.get(['config'], (result) => {
+        if (!result.config) {
+            chrome.storage.local.set({ config: DEFAULT_CONFIG }, () => {
+                console.log('✅ 默认配置已写入 storage');
+            });
+        }
+    });
+});
 
 // === AI 自动回复请求处理 ===
 // 当收到类型为 "callAI" 的消息时，触发 AI 回复生成流程
@@ -17,6 +30,7 @@ const messageHandler = createHandler()
     .use(withLogging)           // 注入日志中间件：自动记录请求、响应与异常
     .use(withAuth)              // 注入权限中间件：可选地验证发送方权限（如是否来自合法页面）
     .handle('callAI', handleCallAI)        // 注册消息类型 'callAI' 的处理器：调用 AI 生成回复
+    .handle('getConfig', handleGetConfig) // 注册消息类型 'getConfig' 的处理器：获取用户配置
     .handle('saveConfig', handleSaveConfig) // 注册消息类型 'saveConfig' 的处理器：保存用户配置
     .build();                   // 构建并返回最终的消息处理器函数
 

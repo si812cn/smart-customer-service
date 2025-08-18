@@ -199,6 +199,40 @@
         }
     }
 
+    // 🌟 全局存储当前配置
+    let currentConfig = null;
+
+    // 🔁 初始化：加载配置
+    async function loadConfig() {
+
+        // 脚本加载完成后，向 background.js 请求当前配置
+        chrome.runtime.sendMessage({ type: 'getConfig' }, (response) => {
+            // 检查通信是否出错
+            if (chrome.runtime.lastError) {
+                console.error('[AutoReply] 与 background 通信失败:', chrome.runtime.lastError);
+                return;
+            }
+
+            // 检查响应是否成功
+            if (response?.success) {
+                currentConfig = response.config;
+            } else {
+                console.error('[getConfig] 配置读取失败');
+            }
+        });
+    }
+
+    // 🚀 启动时加载配置
+    loadConfig();
+
+    // 🔁 监听 storage 变化（可选：配置保存后自动更新）
+    chrome.storage.onChanged.addListener((changes, namespace) => {
+        if (namespace === 'local' && changes.config) {
+            currentConfig = changes.config.newValue;
+            console.log('🔄 配置已更新:', currentConfig);
+        }
+    });
+
     /**
      * 评论监听器：使用 MutationObserver 捕获新评论
      */
@@ -366,7 +400,11 @@
          */
         isFiltered(text) {
             const lower = text.toLowerCase();
-            return Config.FILTER.blockedKeywords.some(kw => lower.includes(kw));
+            let blockedKeywords = Config.FILTER.blockedKeywords;
+            if(currentConfig && currentConfig.text){
+                blockedKeywords = currentConfig.text.blockedKeywords;
+            }
+            return blockedKeywords.some(kw => lower.includes(kw));
         }
 
         /**
@@ -448,14 +486,16 @@
     // ========================
     // 新增功能：消息监听与扩展
     // ========================
-
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         console.log('[content.js] 收到来自 background 的消息:', message);
 
         switch (message.type) {
             case 'showConfigHtml':
-                showConfigPanel();
-                sendResponse({ success: true });
+                showConfigPanel(() => {
+                    // 面板真正显示后才回调
+                    sendResponse({ success: true, message: '面板已显示' });
+                });
+
                 break;
 
             case 'testAI':
@@ -513,69 +553,94 @@
         return true; // 保持异步响应
     });
 
+    // ============ 按需注入 panel.js（懒加载）============
+    // 只有当用户点击“配置助手”按钮时，才动态加载 panel.js
+    // 这样可以减少初始页面加载负担，提升性能
+
+    /**
+     * 动态注入 panel.js 脚本
+     * @param {Function} callback - 脚本加载成功后的回调
+     */
+    function injectPanelScriptAndInit(callback) {
+        // 创建 script 标签用于加载扩展内的 JS 文件
+        const script = document.createElement('script');
+
+        // 使用 chrome.runtime.getURL 获取扩展内资源的合法 URL
+        // 注意路径必须与实际文件位置一致，且在 web_accessible_resources 中声明
+        script.src = chrome.runtime.getURL('ui/config/panel.js');
+
+        // 监听脚本加载成功事件
+        script.onload = () => {
+            console.log('[AutoReply] panel.js 加载完成');
+
+            // 安全检查：确保回调是函数类型
+            if (typeof callback === 'function') {
+                callback(); // 执行后续逻辑（如获取配置并初始化面板）
+            }
+
+            // 清理：移除 script 标签以减少 DOM 污染
+            // 注意：不能立即移除，因为 panel.js 可能还未执行完
+            // 所以这里不移除，由 panel.js 自行管理或后续清理
+        };
+
+        // 监听脚本加载失败事件
+        script.onerror = () => {
+            console.error('[AutoReply] panel.js 加载失败：检查路径或 web_accessible_resources 配置');
+            alert('面板加载失败，请刷新页面重试。');
+        };
+
+        // 将 script 添加到页面头部开始加载
+        document.head.appendChild(script);
+    }
+
+    // ============ 显示配置面板（主入口）============
     /**
      * 显示配置面板（浮动 UI）
+     * 实现：懒加载 panel.js → 获取配置 → 初始化 UI
      */
     function showConfigPanel() {
-        if (document.getElementById('live-assistant-config')) {
-            console.log('配置面板已存在，不再重复创建');
-            return;
-        }
+        injectPanelScriptAndInit(() => {
+            // 脚本加载完成后，向 background.js 请求当前配置
+            chrome.runtime.sendMessage({ type: 'getConfig' }, (response) => {
+                // 检查通信是否出错
+                if (chrome.runtime.lastError) {
+                    console.error('[AutoReply] 与 background 通信失败:', chrome.runtime.lastError);
+                    alert('扩展通信异常，请重试');
+                    return;
+                }
 
-        const panel = document.createElement('div');
-        panel.id = 'live-assistant-config';
-        panel.style.cssText = `
-            position: fixed;
-            top: 10px;
-            right: 10px;
-            width: 300px;
-            height: 400px;
-            background: white;
-            border: 1px solid #ccc;
-            box-shadow: 0 0 10px rgba(0,0,0,0.2);
-            z-index: 999999;
-            padding: 15px;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            border-radius: 8px;
-            overflow: hidden;
-        `;
-
-        panel.innerHTML = `
-            <h3 style="margin-top: 0; color: #333;">直播助手配置</h3>
-            <div style="margin: 10px 0;">
-                <label><input type="checkbox" id="autoReply" ${Config.REPLY.autoSend ? 'checked' : ''}> 开启自动发送</label>
-            </div>
-            <div style="margin: 10px 0;">
-                <label>最大回复长度：</label>
-                <input type="number" id="maxLength" value="${Config.REPLY.maxLength}" min="10" max="100" style="width:60px">
-            </div>
-            <div style="margin: 10px 0;">
-                <label>屏蔽关键词：</label>
-                <textarea id="blockedKeywords" rows="3" style="width:100%">${Config.FILTER.blockedKeywords.join('\n')}</textarea>
-            </div>
-            <button id="saveBtn" 
-                    style="margin: 5px 10px 5px 0; padding: 5px 10px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer;">
-                保存
-            </button>
-            <button id="closeBtn" 
-                    style="padding: 5px 10px; background: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer;">
-                关闭
-            </button>
-        `;
-
-        document.body.appendChild(panel);
-
-        // 绑定事件
-        document.getElementById('closeBtn').onclick = () => panel.remove();
-        document.getElementById('saveBtn').onclick = () => {
-            // 更新 Config（注意：刷新后失效，需配合 storage）
-            Config.REPLY.autoSend = document.getElementById('autoReply').checked;
-            Config.REPLY.maxLength = parseInt(document.getElementById('maxLength').value);
-            const kwText = document.getElementById('blockedKeywords').value;
-            Config.FILTER.blockedKeywords = kwText.split('\n').map(k => k.trim()).filter(k => k);
-            alert('配置已保存（当前页面有效）');
-        };
+                // 检查响应是否成功
+                if (response?.success && typeof window.injectConfigPanel === 'function') {
+                    // 调用 panel.js 中定义的函数，传入配置初始化 UI
+                    window.injectConfigPanel(response.config);
+                } else {
+                    // 失败原因：配置获取失败 或 injectConfigPanel 未定义
+                    const errorMsg = !response?.success ? response?.error : '面板初始化函数未加载';
+                    console.error('[AutoReply] 初始化失败:', errorMsg);
+                    alert('面板初始化失败：' + (errorMsg || '未知错误'));
+                }
+            });
+        });
     }
+
+    // ============ 监听 panel.js 发来的消息 ============
+    // panel.js 通过 postMessage 发送操作指令（如保存、启动等）
+    window.addEventListener('message', (event) => {
+        // 安全检查：确保消息来自当前页面
+        if (event.source !== window) return;
+
+        const message = event.data;
+        if (message.type === 'FROM_PAGE_TO_CONTENT') {
+
+            // 转发给 background.js 处理
+            chrome.runtime.sendMessage(message.data, (response) => {
+
+                console.log('[content.js] 收到 background 响应:', response);
+                // 可选：将响应传回 panel.js
+                window.postMessage({ type: 'FROM_CONTENT_TO_PAGE', data: response }, '*');
+            });
+        }
+    });
 
     /**
      * 开启网络请求监听（抓包模式）

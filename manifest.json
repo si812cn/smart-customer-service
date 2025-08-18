@@ -17,6 +17,7 @@
       "js": [
         "ui/layui.js",
         "popup.js",
+        "ui/config/panel.js",
         "ui/utils/index.js",
         "ui/services/AIProvider.js",
         "ui/services/cozeProvider.js",
@@ -29,6 +30,7 @@
         "background.js",
         "content.js"
       ],
+      "type": "module",
       "matches": [
         "https://*.jinritemai.com/*",
         "https://*.kwaixiaodian.com/*",
@@ -45,7 +47,8 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "ui/font/*"
+        "ui/font/*",
+        "ui/config/panel.js"
       ],
       "matches": [
         "https://*.jinritemai.com/*",

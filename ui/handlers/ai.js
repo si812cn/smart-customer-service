@@ -1,4 +1,5 @@
 import { Utils } from '../utils/index.js';
+import { handleGetConfig } from './config.js';
 import { CozeProvider } from '../services/cozeProvider.js';
 import { OpenAIProvider } from '../services/openaiProvider.js';
 
@@ -8,27 +9,17 @@ import { OpenAIProvider } from '../services/openaiProvider.js';
  */
 export const handleCallAI = async (request, sender) => {
     try {
-        // 从 chrome.storage.local 安全地读取用户配置
-        // local 存储比 sync 更适合存储敏感信息（如 API Key）
-        const config = await chrome.storage.local.get([
-            'botId',           // Coze 平台的 Bot 唯一标识
-            'apiKey',          // Coze API 认证密钥
-            'provider',        // AI模型：coze,gpt
-            'model',           // gpt-3.5-turbo
-            'replyTemplates',  // 用户自定义的多种回复风格模板（对象）
-            'replyTemplate'    // 当前选中的默认模板名称（如 "简洁友好"）
-        ]);
+        // 脚本加载完成后，向 background.js 请求当前配置
+        const responseConfig = await handleGetConfig(request, sender);
 
-        config.botId="7495623233941815337";
-        config.apiKey="pat_mshRxvpwBCdBM6VbJbE3sHkUrOfZ6QgsKPjfGHcky5JqeUvsyFz3MLOPo1mJQE6H";
-
-        if (!config.botId || !config.apiKey) {
+        if (!responseConfig || !responseConfig.config || !responseConfig.config.api || !responseConfig.config.api.cozeBotid || !responseConfig.config.api.cozeApikey) {
             return { error: "请先在插件设置中配置 Bot ID 和 API Key" };
         }
 
-        if(!config.provider){
-            config.provider="coze";
-            config.model="coze";
+        const config = responseConfig.config.api;
+
+        if (!config.cozeBotid || !config.cozeApikey) {
+            return { error: "请先在插件设置中配置 Bot ID 和 API Key" };
         }
 
         const userContent = Utils.sanitizeInput(request.content);
@@ -56,12 +47,12 @@ export const handleCallAI = async (request, sender) => {
 
         switch (config.provider?.toLowerCase()) {
             case "coze":
-                providerInstance = new CozeProvider(config.botId, config.apiKey);
+                providerInstance = new CozeProvider(config.cozeBotid, config.cozeApikey);
                 break;
 
             case "openai":
             case "gpt":
-                providerInstance = new OpenAIProvider(config.apiKey, config.model);
+                providerInstance = new OpenAIProvider(config.cozeApikey, config.model);
                 break;
 
             default:
