@@ -1,17 +1,48 @@
 // panel.js
-// 浮动配置面板（优化版）
+// 浮动配置面板（优化增强版） - 与最新 DEFAULT_CONFIG 对齐
 
 function injectConfigPanel(Config = {}) {
-    const defaultConfig = {
-        text: { autoSend: false, maxLength: 50, blockedKeywords: [] },
-        freq: { timeLimit: 5, speakLimit: 30, speakBreak: 60, kefuBreak: 2 },
+    // ========================
+    // ✅ 默认配置（与最新 DEFAULT_CONFIG 对齐）
+    // ========================
+    const DEFAULT_CONFIG = {
+        text: {
+            autoSend: false,
+            maxLength: 50,
+            qaKeywords: '你好#你好呀\n发货#已安排',
+            finalReplay: '感谢关注，有疑问随时问我哦～',
+            questions: '欢迎来到直播间\n今天有新品上架',
+            blockedKeywords: [
+                '广告', '加微信', '刷单', '加V', '微信', 'qq', 'vx',
+                'telegram', 'tg', '返现', '代运营', '测试', 'demo'
+            ],
+            douyinNickname: '小助手',
+            blackWords: '测试#demo',
+            replyCommentStatus: true
+        },
+        freq: {
+            timeLimit: 3,        // 秒：回复评论最小间隔
+            speakLimit: 30,      // 秒：主动话术推送频率
+            speakBreak: 30,      // 秒：话术后休息时间
+            cooldown: 3000,         // 毫秒：用户级冷却时间
+            maxPerMinute: 20,       // 每分钟最多自动回复条数
+            insertPlaceholder: true,
+            kefuBreak: 2,
+            feigeHumanWords: '人工#转人工',
+            feigeHumanAccount: ''
+        },
+        auto: {
+            speakNum: '',
+            pushProduct: '',
+            pushQuan: ''
+        },
         api: {
             provider: 'coze',
-            model: 'gpt-3.5-turbo',
+            model: 'coze',
             gptApi: 'https://api.openai.com/v1/chat/completions',
             gptKey: '',
-            cozeBotid: '',
-            cozeApikey: '',
+            cozeBotid: '7495623233941815337',
+            cozeApikey: 'pat_mshRxvpwBCdBM6VbJbE3sHkUrOfZ6QgsKPjfGHcky5JqeUvsyFz3MLOPo1mJQE6H',
             apiBase: '',
             hookBase: '',
             audioBase: ''
@@ -19,11 +50,11 @@ function injectConfigPanel(Config = {}) {
     };
 
     // 合并配置
-    const configData = deepMerge(defaultConfig, Config);
+    const configData = deepMerge(DEFAULT_CONFIG, Config);
 
     let panel = document.getElementById('auto-reply-config-panel');
 
-    // ✅ 如果已存在：更新值并显示
+    // ✅ 如果面板已存在：更新值并显示
     if (panel) {
         panel.style.display = 'flex';
         populateForm(configData);
@@ -49,6 +80,7 @@ function injectConfigPanel(Config = {}) {
         display: flex;
         flex-direction: column;
         font-size: 14px;
+        color: #333;
     `;
 
     // 标题栏（可拖拽）
@@ -79,7 +111,6 @@ function injectConfigPanel(Config = {}) {
         padding: 16px;
         background: #f9f9f9;
     `;
-
     body.innerHTML = buildPanelHTML(configData);
     panel.appendChild(body);
 
@@ -117,34 +148,41 @@ function injectConfigPanel(Config = {}) {
 
     document.body.appendChild(panel);
 
-    // 填充初始值
+    // 初始化表单
     populateForm(configData);
 
-    // ============ 事件绑定 ============
+    // 绑定事件
     bindEvents(panel);
 }
 
-// ------------------------------
-// 工具函数
-// ------------------------------
+// ========================
+// 🔧 工具函数
+// ========================
 
-// 深度合并对象
+/**
+ * 深度合并两个对象
+ */
 function deepMerge(target, source) {
     const result = { ...target };
     for (const key in source) {
-        if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
-            result[key] = deepMerge(result[key] || {}, source[key]);
-        } else {
-            result[key] = source[key];
+        if (source.hasOwnProperty(key)) {
+            if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key]) && source[key] !== null) {
+                result[key] = deepMerge(result[key] || {}, source[key]);
+            } else {
+                result[key] = source[key];
+            }
         }
     }
     return result;
 }
 
-// 构建面板 HTML
+/**
+ * 构建面板 HTML
+ */
 function buildPanelHTML(config) {
     return `
         <div class="tab-container">
+            <!-- Tab 导航 -->
             <div class="tab-header" style="display:flex; border-bottom: 2px solid #eee; margin-bottom: 16px;">
                 <div class="tab-item active" data-tab="account" style="padding: 8px 16px; cursor: pointer; font-weight: bold; border-bottom: 2px solid transparent;">账号信息</div>
                 <div class="tab-item" data-tab="text" style="padding: 8px 16px; cursor: pointer; color: #666;">文本配置</div>
@@ -153,6 +191,7 @@ function buildPanelHTML(config) {
                 <div class="tab-item" data-tab="api" style="padding: 8px 16px; cursor: pointer; color: #666;">接口对接</div>
             </div>
 
+            <!-- 内容区 -->
             <div class="tab-content">
 
                 <!-- 账号信息 -->
@@ -165,12 +204,9 @@ function buildPanelHTML(config) {
 
                 <!-- 文本配置 -->
                 <div class="tab-pane hidden" data-pane="text">
-                    <h4 style="margin:12px 0 8px; color:#333;">功能开关</h4>
+                    <h4 style="margin:12px 0 8px; color:#333;">自动回复</h4>
                     <div style="margin: 10px 0;">
-                        <label>
-                            <input type="checkbox" id="autoReply">
-                            开启自动发送
-                        </label>
+                        <label><input type="checkbox" id="autoReply"> 开启自动发送</label>
                     </div>
                     <div style="margin: 10px 0;">
                         <label>最大回复长度：</label>
@@ -178,150 +214,158 @@ function buildPanelHTML(config) {
                     </div>
 
                     <h4 style="margin:12px 0 8px; color:#333;">关键词与回复</h4>
-                    <h5 style="margin:8px 0; color:#555;">关键词话术（#分隔关键词和答案）</h5>
-                    <textarea id="qaKeywords" class="input" style="width:100%; height:80px; padding:8px; border:1px solid #ccc; border-radius:4px; resize:vertical;"></textarea>
+                    <p style="color:#666; margin:4px 0; font-size:13px;">格式：关键词#回复内容（每行一条）</p>
+                    <textarea id="qaKeywords" style="width:100%; height:80px; padding:8px; border:1px solid #ccc; border-radius:4px; resize:vertical;"></textarea>
 
-                    <h5 style="margin:8px 0; color:#555;">兜底回复</h5>
-                    <textarea id="finalReplay" class="input" style="width:100%; height:80px; padding:8px; border:1px solid #ccc; border-radius:4px; resize:vertical;"></textarea>
+                    <p style="color:#666; margin:8px 0 4px; font-size:13px;">兜底回复（无匹配时使用）</p>
+                    <textarea id="finalReplay" style="width:100%; height:80px; padding:8px; border:1px solid #ccc; border-radius:4px; resize:vertical;"></textarea>
 
-                    <h5 style="margin:8px 0; color:#555;">循环话术列表（每行一条）</h5>
-                    <textarea id="questions" class="input" style="width:100%; height:60px; padding:8px; border:1px solid #ccc; border-radius:4px; resize:vertical;"></textarea>
+                    <p style="color:#666; margin:8px 0 4px; font-size:13px;">循环话术（每行一条）</p>
+                    <textarea id="questions" style="width:100%; height:60px; padding:8px; border:1px solid #ccc; border-radius:4px; resize:vertical;"></textarea>
 
-                    <h4 style="margin:12px 0 8px; color:#333;">过滤与屏蔽</h4>
-                    <h5 style="margin:8px 0; color:#555;">屏蔽关键词（每行一个）</h5>
+                    <h4 style="margin:12px 0 8px; color:#333;">过滤设置</h4>
+                    <p style="color:#666; margin:4px 0; font-size:13px;">每行一个关键词，支持部分匹配</p>
                     <textarea id="blockedKeywords" rows="3" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; resize:vertical;"></textarea>
 
                     <hr style="margin:16px 0; border-color: #eee;">
 
-                    <h4 style="margin:12px 0 8px; color:#333;">直播间设置</h4>
-                    <h5 style="margin:8px 0; color:#555;">本人昵称（忽略）</h5>
-                    <input type="text" id="douyinNickname" class="input" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">
+                    <h4 style="margin:12px 0 8px; color:#333;">直播间过滤</h4>
+                    <p style="color:#666; margin:4px 0; font-size:13px;">自己的昵称（不回复）</p>
+                    <input type="text" id="douyinNickname" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">
 
-                    <h5 style="margin:8px 0; color:#555;">忽略关键词（#分隔）</h5>
-                    <input type="text" id="blackWords" class="input" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">
+                    <p style="color:#666; margin:4px 0; font-size:13px;">忽略关键词（#分隔）</p>
+                    <input type="text" id="blackWords" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">
 
                     <div style="margin:10px 0;">
-                        <input type="checkbox" id="replyCommentStatus" name="replyCommentStatus" value="yes" checked>
-                        <label for="replyCommentStatus">是否回复评论</label>
+                        <label><input type="checkbox" id="replyCommentStatus" checked> 回复用户评论</label>
                     </div>
                 </div>
 
                 <!-- 频率配置 -->
                 <div class="tab-pane hidden" data-pane="freq">
-                    <h4 style="margin:8px 0;">回复评论频率（秒）</h4>
-                    <input type="number" id="timeLimit" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">
+                    <h4 style="margin:8px 0; color:#333;">评论回复最小间隔（秒）</h4>
+                    <input type="number" id="timeLimit" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;" placeholder="默认 3 秒">
 
-                    <h4 style="margin:8px 0;">循环话术频率（秒）</h4>
-                    <input type="number" id="speakLimit" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">
+                    <h4 style="margin:8px 0; color:#333;">主动话术频率（秒）</h4>
+                    <input type="number" id="speakLimit" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;" placeholder="默认 30 秒">
 
-                    <h4 style="margin:8px 0;">每轮话术休息（秒）</h4>
-                    <input type="number" id="speakBreak" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">
+                    <h4 style="margin:8px 0; color:#333;">话术后休息时间（秒）</h4>
+                    <input type="number" id="speakBreak" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;" placeholder="默认 30 秒">
 
-                    <h4 style="margin:8px 0;">随机补充两个Emoji表情</h4>
+                    <h4 style="margin:8px 0; color:#333;">用户级冷却时间（毫秒）</h4>
+                    <input type="number" id="cooldown" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;" placeholder="默认 3 秒">
+
+                    <h4 style="margin:8px 0; color:#333;">每分钟最多回复（条）</h4>
+                    <input type="number" id="maxPerMinute" min="1" max="60" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;" placeholder="默认 20 条">
+
                     <div style="margin:10px 0;">
-                        <input type="checkbox" id="insertPlaceholder" name="insertPlaceholder" value="yes" checked>
-                        <label for="insertPlaceholder">是否补充</label>
+                        <label><input type="checkbox" id="insertPlaceholder" checked> 随机插入两个 Emoji 表情</label>
                     </div>
 
-                    <h4 style="margin:8px 0;">抖店|拼多多客服延迟（秒）</h4>
-                    <input type="number" id="kefuBreak" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">
+                    <h4 style="margin:8px 0; color:#333;">客服延迟（秒）</h4>
+                    <input type="number" id="kefuBreak" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;" placeholder="默认 2 秒">
 
-                    <h4 style="margin:8px 0;">转接人工关键词（#分隔）</h4>
-                    <input type="text" id="feigeHumanWords" class="input" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;" value="人工#转人工">
+                    <h4 style="margin:8px 0; color:#333;">转人工关键词（#分隔）</h4>
+                    <input type="text" id="feigeHumanWords" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;" value="人工#转人工">
 
-                    <h4 style="margin:8px 0;">转接人工客服账号</h4>
-                    <input type="text" id="feigeHumanAccount" class="input" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">
+                    <h4 style="margin:8px 0; color:#333;">转人工客服账号</h4>
+                    <input type="text" id="feigeHumanAccount" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">
                 </div>
 
                 <!-- 自动弹窗 -->
                 <div class="tab-pane hidden" data-pane="auto">
-                    <h4 style="margin:8px 0;">循环讲解（几号#几秒）</h4>
-                    <input type="text" id="speakNum" class="input" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">
+                    <h4 style="margin:8px 0; color:#333;">循环讲解（几号#几秒）</h4>
+                    <input type="text" id="speakNum" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;" placeholder="如：1#60">
 
-                    <h4 style="margin:8px 0;">循环弹品（几号#几秒，多行）</h4>
-                    <textarea id="pushProduct" class="input" style="width:100%; height:60px; padding:8px; border:1px solid #ccc; border-radius:4px; resize:vertical;"></textarea>
+                    <h4 style="margin:8px 0; color:#333;">循环弹品（几号#几秒，多行）</h4>
+                    <textarea id="pushProduct" style="width:100%; height:60px; padding:8px; border:1px solid #ccc; border-radius:4px; resize:vertical;"></textarea>
 
-                    <h4 style="margin:8px 0;">循环弹券（几号#几秒）</h4>
-                    <input type="text" id="pushQuan" class="input" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">
+                    <h4 style="margin:8px 0; color:#333;">循环弹券（几号#几秒）</h4>
+                    <input type="text" id="pushQuan" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;" placeholder="如：1#120">
                 </div>
 
                 <!-- 接口对接 -->
                 <div class="tab-pane hidden" data-pane="api">
-                    <h4 style="margin:8px 0;">AI 模型提供商</h4>
+                    <h4 style="margin:8px 0; color:#333;">AI 模型提供商</h4>
                     <select id="provider" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">
                         <option value="coze">Coze</option>
-                        <option value="gpt">GPT</option>
+                        <option value="gpt">GPT (OpenAI)</option>
                     </select>
 
-                    <h4 style="margin:8px 0;">模型名称</h4>
-                    <input type="text" id="model" class="input" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;" value="gpt-3.5-turbo">
+                    <h4 style="margin:8px 0; color:#333;">模型名称</h4>
+                    <input type="text" id="model" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;" value="coze">
 
-                    <h4 style="margin:8px 0;">兼容GPT接口地址</h4>
-                    <input type="text" id="gptApi" class="input" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">
+                    <h4 style="margin:8px 0; color:#333;">GPT 接口地址</h4>
+                    <input type="text" id="gptApi" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;" placeholder="https://...">
 
-                    <h4 style="margin:8px 0;">兼容GPT接口密钥</h4>
-                    <input type="password" id="gptKey" class="input" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">
+                    <h4 style="margin:8px 0; color:#333;">GPT API Key</h4>
+                    <input type="password" id="gptKey" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;" placeholder="隐藏输入">
 
-                    <h4 style="margin:8px 0;">Coze 智能体机器人ID</h4>
-                    <input type="text" id="cozeBotid" class="input" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">
+                    <h4 style="margin:8px 0; color:#333;">Coze 机器人 ID</h4>
+                    <input type="text" id="cozeBotid" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">
 
-                    <h4 style="margin:8px 0;">Coze API_KEY</h4>
-                    <input type="password" id="cozeApikey" class="input" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">
+                    <h4 style="margin:8px 0; color:#333;">Coze API Key</h4>
+                    <input type="password" id="cozeApikey" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;" placeholder="隐藏输入">
 
-                    <h4 style="margin:8px 0;">唯一客服回复接口</h4>
-                    <input type="text" id="apiBase" class="input" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">
+                    <h4 style="margin:8px 0; color:#333;">客服回复接口</h4>
+                    <input type="text" id="apiBase" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;" placeholder="http://...">
 
-                    <h4 style="margin:8px 0;">评论消息 WebHook</h4>
-                    <input type="text" id="hookBase" class="input" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">
+                    <h4 style="margin:8px 0; color:#333;">评论 WebHook</h4>
+                    <input type="text" id="hookBase" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;" placeholder="http://...">
 
-                    <h4 style="margin:8px 0;">回复内容 WebHook</h4>
-                    <input type="text" id="audioBase" class="input" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">
+                    <h4 style="margin:8px 0; color:#333;">回复 WebHook</h4>
+                    <input type="text" id="audioBase" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;" placeholder="http://...">
                 </div>
             </div>
         </div>
     `;
 }
 
-// 填充表单数据
+/**
+ * 填充表单数据
+ */
 function populateForm(config) {
     // 文本配置
-    setChecked('autoReply', config.text?.autoSend);
-    setValue('maxLength', config.text?.maxLength);
-    setValue('qaKeywords', config.text?.qaKeywords);
-    setValue('finalReplay', config.text?.finalReplay);
-    setValue('questions', config.text?.questions);
-    setValue('blockedKeywords', Array.isArray(config.text?.blockedKeywords) ? config.text.blockedKeywords.join('\n') : '');
-    setValue('douyinNickname', config.text?.douyinNickname);
-    setValue('blackWords', config.text?.blackWords);
-    setChecked('replyCommentStatus', config.text?.replyCommentStatus);
+    setChecked('autoReply', config.text.autoSend);
+    setValue('maxLength', config.text.maxLength);
+    setValue('qaKeywords', config.text.qaKeywords);
+    setValue('finalReplay', config.text.finalReplay);
+    setValue('questions', config.text.questions);
+    setValue('blockedKeywords', Array.isArray(config.text.blockedKeywords) ? config.text.blockedKeywords.join('\n') : '');
+    setValue('douyinNickname', config.text.douyinNickname);
+    setValue('blackWords', config.text.blackWords);
+    setChecked('replyCommentStatus', config.text.replyCommentStatus);
 
-    // 频率配置
-    setValue('timeLimit', config.freq?.timeLimit);
-    setValue('speakLimit', config.freq?.speakLimit);
-    setValue('speakBreak', config.freq?.speakBreak);
-    setChecked('insertPlaceholder', config.freq?.insertPlaceholder);
-    setValue('kefuBreak', config.freq?.kefuBreak);
-    setValue('feigeHumanWords', config.freq?.feigeHumanWords);
-    setValue('feigeHumanAccount', config.freq?.feigeHumanAccount);
+    setValue('timeLimit', config.freq.timeLimit);
+    setValue('speakLimit', config.freq.speakLimit);
+    setValue('speakBreak', config.freq.speakBreak);
+    setValue('cooldown', config.freq.cooldown);//毫秒
+    setValue('maxPerMinute', config.freq.maxPerMinute);
+    setChecked('insertPlaceholder', config.freq.insertPlaceholder);
+    setValue('kefuBreak', config.freq.kefuBreak);
+    setValue('feigeHumanWords', config.freq.feigeHumanWords);
+    setValue('feigeHumanAccount', config.freq.feigeHumanAccount);
 
     // 自动弹窗
-    setValue('speakNum', config.auto?.speakNum);
-    setValue('pushProduct', config.auto?.pushProduct);
-    setValue('pushQuan', config.auto?.pushQuan);
+    setValue('speakNum', config.auto.speakNum);
+    setValue('pushProduct', config.auto.pushProduct);
+    setValue('pushQuan', config.auto.pushQuan);
 
     // 接口对接
-    setValue('provider', config.api?.provider);
-    setValue('model', config.api?.model);
-    setValue('gptApi', config.api?.gptApi);
-    setValue('gptKey', config.api?.gptKey);
-    setValue('cozeBotid', config.api?.cozeBotid);
-    setValue('cozeApikey', config.api?.cozeApikey);
-    setValue('apiBase', config.api?.apiBase);
-    setValue('hookBase', config.api?.hookBase);
-    setValue('audioBase', config.api?.audioBase);
+    setValue('provider', config.api.provider);
+    setValue('model', config.api.model);
+    setValue('gptApi', config.api.gptApi);
+    setValue('gptKey', config.api.gptKey);
+    setValue('cozeBotid', config.api.cozeBotid);
+    setValue('cozeApikey', config.api.cozeApikey);
+    setValue('apiBase', config.api.apiBase);
+    setValue('hookBase', config.api.hookBase);
+    setValue('audioBase', config.api.audioBase);
 }
 
-// 辅助函数
+// ========================
+// 🔧 辅助函数
+// ========================
 function setValue(id, value) {
     const el = document.getElementById(id);
     if (el) el.value = value || '';
@@ -332,31 +376,44 @@ function setChecked(id, checked) {
     if (el) el.checked = !!checked;
 }
 
-// 事件绑定
+// ========================
+// 🎯 事件绑定
+// ========================
 function bindEvents(panel) {
     const header = document.getElementById('panel-header');
     const closeBtns = ['closePanel', 'closeBtn'];
 
     // 拖拽逻辑
-    let isDragging = false, offsetX, offsetY;
-    header.addEventListener('mousedown', e => {
+    let isDragging = false;
+    let offsetX, offsetY;
+
+    header.addEventListener('mousedown', (e) => {
         isDragging = true;
         offsetX = e.clientX - panel.getBoundingClientRect().left;
         offsetY = e.clientY - panel.getBoundingClientRect().top;
+        e.preventDefault();
     });
-    document.addEventListener('mousemove', e => {
+
+    document.addEventListener('mousemove', (e) => {
         if (isDragging) {
             panel.style.left = `${e.clientX - offsetX}px`;
             panel.style.right = 'auto';
             panel.style.top = `${e.clientY - offsetY}px`;
         }
     });
-    document.addEventListener('mouseup', () => isDragging = false);
+
+    document.addEventListener('mouseup', () => {
+        isDragging = false;
+    });
 
     // 关闭按钮
     closeBtns.forEach(id => {
         const btn = document.getElementById(id);
-        if (btn) btn.addEventListener('click', () => panel.style.display = 'none');
+        if (btn) {
+            btn.addEventListener('click', () => {
+                panel.style.display = 'none';
+            });
+        }
     });
 
     // Tab 切换
@@ -373,83 +430,79 @@ function bindEvents(panel) {
     document.getElementById('mSaveButton').addEventListener('click', () => {
         const config = {
             text: {
-                autoSend: document.getElementById('autoReply').checked,
-                maxLength: parseInt(document.getElementById('maxLength').value) || 50,
-                qaKeywords: document.getElementById('qaKeywords').value,
-                finalReplay: document.getElementById('finalReplay').value,
-                questions: document.getElementById('questions').value,
-                blockedKeywords: document.getElementById('blockedKeywords').value
-                    .split('\n').map(k => k.trim()).filter(k => k),
-                douyinNickname: document.getElementById('douyinNickname').value,
-                blackWords: document.getElementById('blackWords').value,
-                replyCommentStatus: document.getElementById('replyCommentStatus').checked,
+                autoSend: getChecked('autoReply'),
+                maxLength: getInt('maxLength', 50),
+                qaKeywords: getValue('qaKeywords'),
+                finalReplay: getValue('finalReplay'),
+                questions: getValue('questions'),
+                blockedKeywords: getLines('blockedKeywords'),
+                douyinNickname: getValue('douyinNickname'),
+                blackWords: getValue('blackWords'),
+                replyCommentStatus: getChecked('replyCommentStatus')
             },
             freq: {
-                timeLimit: parseInt(document.getElementById('timeLimit').value) || 5,
-                speakLimit: parseInt(document.getElementById('speakLimit').value) || 30,
-                speakBreak: parseInt(document.getElementById('speakBreak').value) || 60,
-                insertPlaceholder: document.getElementById('insertPlaceholder').checked,
-                kefuBreak: parseInt(document.getElementById('kefuBreak').value) || 2,
-                feigeHumanWords: document.getElementById('feigeHumanWords').value,
-                feigeHumanAccount: document.getElementById('feigeHumanAccount').value,
+                timeLimit: getInt('timeLimit', 3),
+                speakLimit: getInt('speakLimit', 30),
+                speakBreak: getInt('speakBreak', 30),
+                cooldown: getInt('cooldown', 3000),          // 毫秒
+                maxPerMinute: getInt('maxPerMinute', 20),
+                insertPlaceholder: getChecked('insertPlaceholder'),
+                kefuBreak: getInt('kefuBreak', 2),
+                feigeHumanWords: getValue('feigeHumanWords'),
+                feigeHumanAccount: getValue('feigeHumanAccount')
             },
             auto: {
-                speakNum: document.getElementById('speakNum').value,
-                pushProduct: document.getElementById('pushProduct').value,
-                pushQuan: document.getElementById('pushQuan').value,
+                speakNum: getValue('speakNum'),
+                pushProduct: getValue('pushProduct'),
+                pushQuan: getValue('pushQuan')
             },
             api: {
-                provider: document.getElementById('provider').value,
-                model: document.getElementById('model').value,
-                gptApi: document.getElementById('gptApi').value,
-                gptKey: document.getElementById('gptKey').value,
-                cozeBotid: document.getElementById('cozeBotid').value,
-                cozeApikey: document.getElementById('cozeApikey').value,
-                apiBase: document.getElementById('apiBase').value,
-                hookBase: document.getElementById('hookBase').value,
-                audioBase: document.getElementById('audioBase').value,
+                provider: getValue('provider'),
+                model: getValue('model'),
+                gptApi: getValue('gptApi'),
+                gptKey: getValue('gptKey'),
+                cozeBotid: getValue('cozeBotid'),
+                cozeApikey: getValue('cozeApikey'),
+                apiBase: getValue('apiBase'),
+                hookBase: getValue('hookBase'),
+                audioBase: getValue('audioBase')
             }
         };
 
-        // 使用 postMessage 发送给 content.js
+        // 发送配置给 content.js
         window.postMessage({
             type: 'FROM_PAGE_TO_CONTENT',
             data: { type: 'saveConfig', data: config }
         }, '*');
     });
 
-    // ================================
-    // ✅ 新增：监听保存结果响应
-    // ================================
+    // 监听保存结果
     window.addEventListener('message', (event) => {
         if (event.source !== window) return;
-
         const message = event.data;
-        if (message.type === 'FROM_CONTENT_TO_PAGE') {
-            const response = message.data;
-
-            // 或者用更优雅的 toast（推荐）
-            showSaveResult(response.success, response.error);
+        if (message.type === 'FROM_CONTENT_TO_PAGE' && message.data) {
+            const { success, error } = message.data;
+            showSaveResult(success, error);
         }
     });
 
-    // 可选：封装成函数
+    // 显示保存结果提示
     function showSaveResult(success, error) {
         const toast = document.createElement('div');
         toast.style.cssText = `
             position: fixed; top: 20px; right: 20px;
-            padding: 12px 24px; border-radius: 6px;
-            color: white; font-size: 14px; z-index: 9999;
+            padding: 12px 24px; border-radius: 6px; color: white;
+            font-size: 14px; z-index: 999999; opacity: 0;
+            transition: opacity 0.3s; pointer-events: none;
             background: ${success ? '#4CAF50' : '#f44336'};
-            opacity: 0; transition: opacity 0.3s; pointer-events: none;
         `;
-        toast.textContent = success ? '✅ 保存成功' : '❌ ' + (error || '保存失败');
+        toast.textContent = success ? '✅ 保存成功' : `❌ ${error || '保存失败'}`;
         document.body.appendChild(toast);
-        setTimeout(() => { toast.style.opacity = '1'; }, 10);
+        setTimeout(() => { toast.style.opacity = '1'; }, 100);
         setTimeout(() => { toast.remove(); }, 3000);
     }
 
-    // 其他按钮
+    // 快捷按钮事件
     ['startButton', 'startLoopButton', 'douyinFeige'].forEach(id => {
         const btn = document.getElementById(id);
         if (btn) {
@@ -461,7 +514,32 @@ function bindEvents(panel) {
             });
         }
     });
+
+    // 新增：输入框获取值的辅助函数
+    function getValue(id) {
+        const el = document.getElementById(id);
+        return el ? el.value.trim() : '';
+    }
+
+    function getChecked(id) {
+        const el = document.getElementById(id);
+        return el ? el.checked : false;
+    }
+
+    function getInt(id, fallback) {
+        const val = parseInt(getValue(id));
+        return isNaN(val) ? fallback : val;
+    }
+
+    function getLines(id) {
+        return getValue(id)
+            .split('\n')
+            .map(line => line.trim())
+            .filter(line => line.length > 0);
+    }
 }
 
-// 导出函数（供外部调用）
-if (typeof module !== 'undefined') module.exports = { injectConfigPanel };
+// 导出（用于模块化环境）
+if (typeof module !== 'undefined') {
+    module.exports = { injectConfigPanel };
+}

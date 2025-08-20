@@ -28,6 +28,8 @@
         "ui/middleware/logging.js",
         "ui/middleware/index.js",
         "background.js",
+        "ui/handlers/core.js",
+        "ui/handlers/douyin_im.js",
         "content.js"
       ],
       "type": "module",
@@ -48,7 +50,9 @@
     {
       "resources": [
         "ui/font/*",
-        "ui/config/panel.js"
+        "ui/config/panel.js",
+        "ui/handlers/core.js",
+        "ui/handlers/douyin_im.js"
       ],
       "matches": [
         "https://*.jinritemai.com/*",

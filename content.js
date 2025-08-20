@@ -9,318 +9,46 @@
 (function () {
     'use strict';
 
-    /**
-     * 全局配置对象
-     * 所有可调参数集中管理，便于后期通过 popup 扩展配置
-     */
-    const Config = {
-        REPLY: {
-            // 用户级冷却时间（毫秒）：同一用户3秒内不重复回复
-            cooldown: 3000,
-            // 每分钟最多自动回复条数，防止被平台限流
-            maxPerMinute: 20,
-            // 回复内容最大长度（字符）
-            maxLength: 30,
-            // 是否开启自动发送（false 则只填入不发送）
-            autoSend: true
-        },
-        FILTER: {
-            // 屏蔽关键词列表：包含这些词的评论将被忽略
-            blockedKeywords: [
-                '刷单', '加V', '微信', 'qq', 'vx',
-                'telegram', 'tg', '返现', '代运营'
-            ]
-        }
-    };
-
-    /**
-     * 工具类：通用方法封装
-     */
-    const Utils = {
-        /**
-         * 获取当前时间戳
-         * @returns {number} 当前时间毫秒值
-         */
-        now() { return Date.now(); },
-
-        /**
-         * 根据当前页面 URL 判断所属直播平台
-         * @returns {string} 平台标识（如 douyin, kuaishou）
-         */
-        getPlatform() {
-            const host = location.host;
-            if (host.includes('jinritemai')) return 'douyin';
-            if (host.includes('kwaixiaodian')) return 'kuaishou';
-            if (host.includes('xiaohongshu')) return 'xiaohongshu';
-            if (host.includes('weixin')) return 'shipinhao';
-            if (host.includes('baidu')) return 'baidu';
-            if (host.includes('jd')) return 'jingdong';
-            if (host.includes('taobao')) return 'taobao';
-            if (host.includes('tiktok')) return 'tiktok';
-            return 'unknown';
-        },
-        /**
-         * 规范化字符串（用于生成安全的 key）
-         * @param {string} str - 原始字符串
-         * @param {number} maxLength - 最大长度
-         * @returns {string} 规范化后的字符串
-         */
-        normalize(str, maxLength = 32) {
-            return String(str)
-                .replace(/:/g, '：')                    // 冒号 → 全角
-                .replace(/\s+/g, '_')                   // 空白 → 下划线
-                .replace(/[^a-zA-Z0-9\u4e00-\u9fa5\-_.：]/g, '') // 白名单
-                .substring(0, maxLength)
-                .toLowerCase();
-        },
-        /**
-         * 创建评论唯一键（用于去重）
-         * @param {string} user - 用户名
-         * @param {string} text - 评论内容
-         * @returns {string} 唯一键，格式：comment:user:text
-         */
-        createCommentKey(user, text) {
-            const safeUser = this.normalize(user);
-            const safeText = this.normalize(text, 20); // 文本适当缩短
-            return `comment:${safeUser}:${safeText}`;
-        }
-    };
-
-    /**
-     * 各平台关键元素的 XPath 选择器
-     * 支持多路径（用 | 分隔）作为回退机制
-     */
-    const SELECTORS = {
-        INPUT: {
-            douyin: '//textarea[@class="webcast-chatroom___textarea"]',
-            kuaishou: '//textarea[contains(@class,"comment-input")]',
-            xiaohongshu: '//textarea[contains(@class,"d-text")]',
-            shipinhao: '//textarea[@class="message-input"]',
-            baidu: '//input[@id="input"]',
-            taobao: '//textarea[@placeholder="回复观众"]',
-            jingdong: '//textarea[contains(@class,"textArea")]',
-            tiktok: '//div[@contenteditable="plaintext-only"]'
-        },
-        SEND: {
-            douyin: '//button[@data-e2e="send-button"]',
-            kuaishou: '//button[contains(@class,"submit-button")]',
-            xiaohongshu: '//span[text()="发送"]/ancestor::button',
-            shipinhao: '//button[contains(@class,"send-btn")]',
-            baidu: '//button[.//text()="发送"]',
-            taobao: '//span[text()="发布"]/ancestor::button',
-            jingdong: '//button[.//span[text()="发送"]]',
-            tiktok: '//button[@aria-label="Send message"]'
-        },
-        COMMENT_LIST: {
-            douyin: '//div[contains(@class,"comment-item")]',
-            kuaishou: '//div[@class="item"]',
-            xiaohongshu: '//div[@class="comment-item"]',
-            shipinhao: '//div[@class="comment-content"]',
-            baidu: '//div[@class="comment-text"]',
-            taobao: '//div[contains(@class,"comment-content")]',
-            jingdong: '//div[@class="comment-content"]',
-            tiktok: '//div[@data-e2e="comment-item"]'
-        },
-        COMMENT_USER: {
-            douyin: './/span[contains(@class,"user-name")]',
-            kuaishou: './/div[contains(@class,"user")]//span',
-            xiaohongshu: './/span[contains(@class,"username")]',
-            shipinhao: './/span[contains(@class,"user-name")]',
-            baidu: './/span[contains(@class,"user")]',
-            taobao: './/span[contains(@class,"user-nick")]',
-            jingdong: './/span[contains(@class,"user-name")]',
-            tiktok: './/span[contains(@class,"user-name")]'
-        },
-        COMMENT_TEXT: {
-            douyin: './/span[contains(@class,"comment-text")]',
-            kuaishou: './/div[contains(@class,"content")]',
-            xiaohongshu: './/span[contains(@class,"content")]',
-            shipinhao: './/span[contains(@class,"comment-text")]',
-            baidu: './/span[contains(@class,"text")]',
-            taobao: './/span[contains(@class,"text")]',
-            jingdong: './/span[contains(@class,"content")]',
-            tiktok: './/span[contains(@class,"comment-text")]'
-        }
-    };
-
-    /**
-     * XPath 工具类：封装查询与等待逻辑
-     */
-    class XPathUtil {
-        /**
-         * 执行 XPath 查询，返回第一个匹配元素
-         * @param {string} xpath - XPath 表达式
-         * @param {Node} ctx - 查询上下文（默认 document）
-         * @returns {Element|null} 匹配的 DOM 元素或 null
-         */
-        static query(xpath, ctx = document) {
-            try {
-                return document.evaluate(xpath, ctx, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-            } catch (e) {
-                console.warn('[XPath] 查询失败:', xpath, e);
-                return null;
-            }
-        }
-
-        /**
-         * 等待元素出现（轮询机制）
-         * @param {string} xpath - 要等待的元素 XPath
-         * @param {Function} cb - 元素找到后的回调函数
-         * @param {number} retries - 最大重试次数
-         * @param {number} interval - 重试间隔（毫秒）
-         */
-        static waitFor(xpath, cb, retries = 60, interval = 500) {
-            const el = this.query(xpath);
-            if (el) {
-                cb(el);
-            } else if (retries > 0) {
-                setTimeout(() => this.waitFor(xpath, cb, retries - 1, interval), interval);
-            } else {
-                console.warn('[XPath] 元素未找到，放弃:', xpath);
-            }
-        }
-
-        /**
-         * 查询所有匹配 XPath 的元素
-         * @param {string} xpath - XPath 表达式
-         * @param {Node} ctx - 上下文
-         * @returns {Element[]} 元素数组
-         */
-        static queryAll(xpath, ctx = document) {
-            const res = [];
-            try {
-                const iter = document.evaluate(xpath, ctx, null, XPathResult.ORDERED_NODE_ITERATOR_TYPE, null);
-                let node;
-                while ((node = iter.iterateNext())) res.push(node);
-            } catch (e) {
-                console.warn('[XPath] queryAll 失败:', xpath, e);
-            }
-            return res;
-        }
+    function getPlatform() {
+        const host = location.host;
+        if (host === 'buyin.jinritemai.com') return 'douyin_live';
+        if (host === 'im.jinritemai.com') return 'douyin_im';
+        if (host.includes('kwaixiaodian')) return 'kuaishou';
+        if (host.includes('xiaohongshu')) return 'xiaohongshu';
+        if (host.includes('weixin')) return 'shipinhao';
+        if (host.includes('baidu')) return 'baidu';
+        if (host.includes('jd')) return 'jingdong';
+        if (host.includes('taobao')) return 'taobao';
+        if (host.includes('tiktok')) return 'tiktok';
+        return 'unknown';
     }
-
-    // 🌟 全局存储当前配置
-    let currentConfig = null;
-
-    // 🔁 初始化：加载配置
-    async function loadConfig() {
-
-        // 脚本加载完成后，向 background.js 请求当前配置
-        chrome.runtime.sendMessage({ type: 'getConfig' }, (response) => {
-            // 检查通信是否出错
-            if (chrome.runtime.lastError) {
-                console.error('[AutoReply] 与 background 通信失败:', chrome.runtime.lastError);
-                return;
-            }
-
-            // 检查响应是否成功
-            if (response?.success) {
-                currentConfig = response.config;
-            } else {
-                console.error('[getConfig] 配置读取失败');
-            }
-        });
-    }
-
-    // 🚀 启动时加载配置
-    loadConfig();
 
     // 🔁 监听 storage 变化（可选：配置保存后自动更新）
     chrome.storage.onChanged.addListener((changes, namespace) => {
         if (namespace === 'local' && changes.config) {
-            currentConfig = changes.config.newValue;
-            console.log('🔄 配置已更新:', currentConfig);
+            console.log('[AutoReply] 收到配置更新通知');
+            window.AutoReplyCore.ConfigManager.onUpdate(changes.config.newValue);
         }
     });
 
     /**
-     * 评论监听器：使用 MutationObserver 捕获新评论
+     * 客服助手主类
      */
-    class CommentObserver {
-        /**
-         * @param {Function} onNewComment - 新评论回调函数
-         */
-        constructor(onNewComment) {
-            this.onNewComment = onNewComment;
-            this.seenComments = new Set(); // 已处理评论去重
-            this.start();
-        }
-
-        /**
-         * 启动监听
-         */
-        start() {
-            const platform = Utils.getPlatform();
-            const listSelector = SELECTORS.COMMENT_LIST[platform];
-
-            if (!listSelector) {
-                console.warn('[CommentObserver] 不支持的平台:', platform);
-                return;
-            }
-
-            const observer = new MutationObserver(() => {
-                this.extractNewComments(); // 统一方法名
-            });
-
-            XPathUtil.waitFor(listSelector, (container) => {
-                if (container) {
-                    // 监听父元素，提高稳定性
-                    const parent = container.parentElement || document.body;
-                    observer.observe(parent, { childList: true, subtree: true });
-                    console.log('[CommentObserver] 已监听评论区');
-
-                    // 初次检查已有评论
-                    this.extractNewComments();
-                }
-            });
-        }
-
-        /**
-         * 提取新评论并触发回调
-         */
-        extractNewComments() {
-            const platform = Utils.getPlatform();
-            const items = XPathUtil.queryAll(SELECTORS.COMMENT_LIST[platform]);
-
-            items.forEach(item => {
-                const userEl = XPathUtil.query(SELECTORS.COMMENT_USER[platform], item);
-                const textEl = XPathUtil.query(SELECTORS.COMMENT_TEXT[platform], item);
-
-                if (!userEl || !textEl) return;
-
-                const user = userEl.textContent.trim();
-                const text = textEl.textContent.trim();
-                const id = Utils.createCommentKey(user, text);
-
-                // 去重：避免重复处理
-                if (!this.seenComments.has(id)) {
-                    this.seenComments.add(id);
-                    this.onNewComment({
-                        user,
-                        text,
-                        timestamp: Utils.now()
-                    });
-                }
-            });
-        }
-    }
-
-    /**
-     * 直播助手主类
-     */
-    class LiveAssistant {
+    class CustAssistant {
         constructor() {
-            console.log("start liveassistant!");
-            this.platform = Utils.getPlatform();
-            this.inputSelector = SELECTORS.INPUT[this.platform];
-            this.sendSelector = SELECTORS.SEND[this.platform];
+            console.log("start custassistant!");
+            this.platform = getPlatform();
+            this.config = null;
+            this.utils = null;
+            this.xpathUtils = null;
+            this.inputSelector = null;
+            this.sendSelector = null;
             this.isProcessing = false;        // 防并发锁
             this.replyCount = 0;              // 当前分钟已回复数
             this.lastReplyTime = 0;           // 上次回复时间
-            this.userCooldown = new Map();    // 用户冷却时间表
-            console.log(this.platform);
-            console.log(this.inputSelector);
-            console.log(this.sendSelector);
+            this.userCooldown = new Map();    // 用户冷却时间表// 构造函数中添加
+            this.seenComments = new Set();    // 去重机制（防重复评论瞬间触发）
+
             this.init();
         }
 
@@ -329,12 +57,9 @@
          */
         init() {
             if (this.platform === 'unknown') {
-                console.warn('[LiveAssistant] 不支持的平台:', location.host);
+                console.warn('[CustAssistant] 不支持的平台:', location.host);
                 return;
             }
-
-            // 启动评论监听
-            new CommentObserver((comment) => this.handleComment(comment));
 
             // 防冲突：用户手动输入时暂停自动回复
             document.addEventListener('focusin', () => {
@@ -344,7 +69,7 @@
                 setTimeout(() => this.isProcessing = false, 1000);
             });
 
-            console.log(`[LiveAssistant] 已启动，平台: ${this.platform}`);
+            console.log(`[CustAssistant] 已启动，平台: ${this.platform}`);
         }
 
         /**
@@ -352,6 +77,12 @@
          * @param {Object} comment - 评论对象 { user, text }
          */
         async handleComment(comment) {
+            this.config =window.AutoReplyCore.ConfigManager.get();
+            this.utils = window.AutoReplyCore.Utils;
+            this.xpathUtils = window.AutoReplyCore.XPathUtil;
+            this.inputSelector = window.AutoReplyCore.SELECTORS.INPUT[this.platform];
+            this.sendSelector = window.AutoReplyCore.SELECTORS.SEND[this.platform];
+
             // 条件检查：过滤 + 冷却 + 并发锁
             if (this.isFiltered(comment.text)) {
                 console.debug('[过滤] 忽略评论:', comment.text);
@@ -366,21 +97,35 @@
                 return;
             }
 
+            const key = this.utils.createCommentKey(comment.user, comment.text, "reply");
+            if (this.seenComments.has(key)) {
+                console.debug('[去重] 已处理:', comment.text);
+                return;
+            }
+            this.seenComments.add(key);
+
+            setTimeout(() => {
+                // 安全删除：避免重复删除报错
+                if (this.seenComments.has(key)) {
+                    this.seenComments.delete(key);
+                }
+            }, 5 * 60 * 1000); // 5分钟后自动清除
+
             this.isProcessing = true;
 
             try {
                 // 向 background.js 请求 AI 回复
                 const response = await chrome.runtime.sendMessage({
                     type: 'callAI',
-                    content: '${comment.text}',
-                    nickname: '${comment.user}'
+                    content: comment.text,
+                    nickname: comment.user
                 });
 
                 if (response?.reply) {
                     // 清理回复内容
-                    const clean = response.reply.trim().slice(0, Config.REPLY.maxLength);
+                    const clean = response.reply.trim().slice(0, this.config.text.maxLength);
                     await this.insertReply(clean);
-                    if (Config.REPLY.autoSend) {
+                    if (this.config.text.autoSend) {
                         await this.sendReply();
                     }
                     this.updateStats(comment.user);
@@ -400,10 +145,7 @@
          */
         isFiltered(text) {
             const lower = text.toLowerCase();
-            let blockedKeywords = Config.FILTER.blockedKeywords;
-            if(currentConfig && currentConfig.text){
-                blockedKeywords = currentConfig.text.blockedKeywords;
-            }
+            let blockedKeywords = this.config.text.blockedKeywords;
             return blockedKeywords.some(kw => lower.includes(kw));
         }
 
@@ -413,11 +155,11 @@
          * @returns {boolean} 是否允许回复
          */
         canReplyNow(user) {
-            const now = Utils.now();
-            const safeUser = Utils.normalize(user);
+            const now = this.utils.now();
+            const safeUser = this.utils.normalize(user);
             const last = this.userCooldown.get(safeUser) || 0;
-            const onCooldown = now - last < Config.REPLY.cooldown;
-            const rateLimited = this.replyCount >= Config.REPLY.maxPerMinute &&
+            const onCooldown = now - last < this.config.freq.cooldown;
+            const rateLimited = this.replyCount >= this.config.freq.maxPerMinute &&
                 (now - this.lastReplyTime) < 60000;
             return !onCooldown && !rateLimited;
         }
@@ -427,12 +169,12 @@
          * @param {string} user - 用户名
          */
         updateStats(user) {
-            const safeUser = Utils.normalize(user);
-            this.userCooldown.set(safeUser, Utils.now());
+            const safeUser = this.utils.normalize(user);
+            this.userCooldown.set(safeUser, this.utils.now());
             this.replyCount++;
-            if (Utils.now() - this.lastReplyTime > 60000) {
+            if (this.utils.now() - this.lastReplyTime > 60000) {
                 this.replyCount = 1;
-                this.lastReplyTime = Utils.now();
+                this.lastReplyTime = this.utils.now();
             }
         }
 
@@ -443,7 +185,7 @@
          */
         async insertReply(text) {
             return new Promise(resolve => {
-                XPathUtil.waitFor(this.inputSelector, (inputEl) => {
+                this.xpathUtils.waitFor(this.inputSelector, (inputEl) => {
                     if (!inputEl) {
                         console.warn('[输入框] 未找到，跳过');
                         return resolve();
@@ -469,7 +211,7 @@
          */
         async sendReply() {
             return new Promise(resolve => {
-                XPathUtil.waitFor(this.sendSelector, (btn) => {
+                this.xpathUtils.waitFor(this.sendSelector, (btn) => {
                     if (btn && !btn.disabled) {
                         btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
                         btn.click();
@@ -500,6 +242,7 @@
 
             case 'testAI':
                 console.log("enter testAI");
+                const config =window.AutoReplyCore.ConfigManager.get();
                 try {
                     // 向 background.js 请求 AI 回复
                     chrome.runtime.sendMessage(
@@ -518,7 +261,7 @@
                             }
 
                             if (response?.reply) {
-                                const clean = response.reply.trim().slice(0, Config.REPLY.maxLength);
+                                const clean = response.reply.trim().slice(0, config.text.maxLength);
                                 console.log('[AI回复已发送]', clean);
                                 sendResponse({ success: true, msg: '[AI回复已发送]' });
                             } else {
@@ -552,6 +295,70 @@
 
         return true; // 保持异步响应
     });
+
+    /**
+     * 动态注入 新消息处理脚本
+     * @param {string} platform - 平台名称，如 'douyin_im', 'kuaishou_im'
+     */
+    function injectCoreAndPlatform(platform) {
+        console.log("injectCoreAndPlatform:");
+        if (platform === 'unknown') return;
+
+        // 1. 先注入核心模块
+        const coreScript = document.createElement('script');
+        coreScript.src = chrome.runtime.getURL('ui/handlers/core.js');
+
+        coreScript.onload = () => {
+            console.log('[AutoReply] 核心模块加载完成');
+
+            // ✅ 初始化配置管理器
+            window.AutoReplyCore.ConfigManager.init(() => {
+                console.log('[AutoReply] 配置初始化完成，开始注入平台脚本');
+
+                // 注入平台专用脚本
+                const platformScript = document.createElement('script');
+                platformScript.src = chrome.runtime.getURL(`ui/handlers/${platform}.js`);
+
+                platformScript.onload = () => {
+                    console.log(`[AutoReply] ${platform} 平台处理器加载完成`);
+
+                    // 启动监听
+                    startObserver();
+                };
+
+                platformScript.onerror = (event ) => {
+                    console.error(`[AutoReply] ${platform}.js 加载失败`);
+                    console.error('❌ 脚本加载失败:', event);
+                    console.error('目标 URL:', platformScript.src);
+                };
+
+                document.head.appendChild(platformScript);
+            });
+        };
+
+        coreScript.onerror = (event) => {
+            console.error('[AutoReply] core.js 加载失败');
+            console.error('❌ 脚本加载失败:', event);
+            console.error('目标 URL:', coreScript.src);
+        };
+
+        document.head.appendChild(coreScript);
+    }
+
+    function startObserver() {
+        // 加防抖，避免频繁触发
+        let debounceTimer;
+        const observer = new MutationObserver(() => {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+                if (typeof window.extractNewComments === 'function') {
+                    window.extractNewComments();
+                }
+            }, 300); // 300ms 内只执行一次
+        });
+
+        observer.observe(document.body, { childList: true, subtree: true });
+    }
 
     // ============ 按需注入 panel.js（懒加载）============
     // 只有当用户点击“配置助手”按钮时，才动态加载 panel.js
@@ -690,6 +497,9 @@
     // ========================
     // 启动主程序
     // ========================
-    new LiveAssistant();
+    window.custAssistant = new CustAssistant();
 
+    console.log("call injectCoreAndPlatform:");
+    // 注入核心模块（例：douyin_im）
+    injectCoreAndPlatform(getPlatform());
 })();

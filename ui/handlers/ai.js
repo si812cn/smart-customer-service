@@ -31,12 +31,12 @@ export const handleCallAI = async (request, sender) => {
         // 优先使用请求中指定的模板（request.template）
         // 其次使用用户设置的默认模板（config.replyTemplate）
         // 最后使用内置的默认提示词
-        const templateName = request.template || config.replyTemplate || "简洁友好";
+        // const templateName = request.template || config.replyTemplate || "简洁友好";
 
         // 根据模板名称查找对应的提示词内容
         // 若未找到，则使用默认的主播口吻提示词
-        const templatePrompt = config.replyTemplates?.[templateName] ||
-            "你是直播间主播，用亲切自然的语气回复粉丝。不要加‘回复：’等前缀。";
+        // const templatePrompt = config.replyTemplates?.[templateName] ||
+        //     "你是直播间主播，用亲切自然的语气回复粉丝。不要加‘回复：’等前缀。";
 
         // 构建最终发送给 AI 的完整提示词
         // sanitizeInput 是一个用于防止 prompt 注入的安全函数（需确保已定义）
