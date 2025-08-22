@@ -70,6 +70,17 @@ window.AutoReplyCore = {
             jingdong: '//div[@class="comment-content"]',
             tiktok: '//div[@data-e2e="comment-item"]'
         },
+        COMMENT_CONTAINER: {
+            douyin_live: '//div[contains(@class,"comment-item")]',
+            douyin_im: `//div[contains(@class, 'messageList')]//div[contains(@class, 'list_items')]`,
+            kuaishou: '//div[@class="item"]',
+            xiaohongshu: '//div[@class="comment-item"]',
+            shipinhao: '//div[@class="comment-content"]',
+            baidu: '//div[@class="comment-text"]',
+            taobao: '//div[contains(@class,"comment-content")]',
+            jingdong: '//div[@class="comment-content"]',
+            tiktok: '//div[@data-e2e="comment-item"]'
+        },
         COMMENT_USER: {
             douyin_live: './/span[contains(@class,"user-name")]',
             douyin_im: '//*[@id="workspace-chat"]/div[3]/div[1]/div[1]/span/div',
@@ -241,7 +252,7 @@ window.AutoReplyCore = {
             _useFallbackConfig() {
                 currentConfig = null;
                 isLoaded = false;
-                console.log('background 未响应 [ConfigManager] 默认配置加载失败');
+                console.error('background 未响应 [ConfigManager] 默认配置加载失败');
             },
 
             /**

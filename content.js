@@ -297,67 +297,115 @@
     });
 
     /**
-     * 动态注入 新消息处理脚本
-     * @param {string} platform - 平台名称，如 'douyin_im', 'kuaishou_im'
+     * 动态注入核心配置和平台专用脚本
+     *
+     * @param {string} platform - 平台标识，如 'douyin_im'、'xhs_ai' 等
+     *                        'unknown' 表示不支持的平台，将直接返回
+     *
+     * 流程：
+     * 1. 检查平台是否有效
+     * 2. 初始化全局配置管理器（异步）
+     * 3. 获取当前浏览器标签页（tab）
+     * 4. 向该标签页注入平台专用处理器脚本（如 douyin_im.js）
+     * 5. 等待脚本执行完成
+     * 6. 启动 DOM 监听器，开始监听新消息
      */
-    function injectCoreAndPlatform(platform) {
-        console.log("injectCoreAndPlatform:");
+    async function injectCommentsHandler(platform) {
+        console.log("injectCommentsHandler: 正在注入平台脚本", platform);
+
         if (platform === 'unknown') return;
 
-        // 1. 先注入核心模块
-        const coreScript = document.createElement('script');
-        coreScript.src = chrome.runtime.getURL('ui/handlers/core.js');
-
-        coreScript.onload = () => {
-            console.log('[AutoReply] 核心模块加载完成');
-
-            // ✅ 初始化配置管理器
-            window.AutoReplyCore.ConfigManager.init(() => {
-                console.log('[AutoReply] 配置初始化完成，开始注入平台脚本');
-
-                // 注入平台专用脚本
-                const platformScript = document.createElement('script');
-                platformScript.src = chrome.runtime.getURL(`ui/handlers/${platform}.js`);
-
-                platformScript.onload = () => {
-                    console.log(`[AutoReply] ${platform} 平台处理器加载完成`);
-
-                    // 启动监听
-                    startObserver();
-                };
-
-                platformScript.onerror = (event ) => {
-                    console.error(`[AutoReply] ${platform}.js 加载失败`);
-                    console.error('❌ 脚本加载失败:', event);
-                    console.error('目标 URL:', platformScript.src);
-                };
-
-                document.head.appendChild(platformScript);
+        try {
+            // ✅ 将回调式 init 包装为 Promise
+            await new Promise((resolve, reject) => {
+                window.AutoReplyCore.ConfigManager.init((config) => {
+                    if (config) {
+                        console.log('[AutoReply] 配置初始化完成');
+                        resolve(config);
+                    } else {
+                        console.warn('[AutoReply] 配置加载失败，使用默认值继续');
+                        resolve(null); // 继续执行，但无配置
+                    }
+                });
             });
-        };
 
-        coreScript.onerror = (event) => {
-            console.error('[AutoReply] core.js 加载失败');
-            console.error('❌ 脚本加载失败:', event);
-            console.error('目标 URL:', coreScript.src);
-        };
+            // ✅ 第二步：通知 background.js 执行脚本注入
+            // 注意：content.js 不能直接调用 chrome.scripting.executeScript
+            const result = await chrome.runtime.sendMessage({
+                type: 'INJECT_COMMENTS_HANDLER_SCRIPT',
+                platform: platform
+            });
 
-        document.head.appendChild(coreScript);
+            if (!result?.success) {
+                console.error(`[AutoReply] 脚本注入失败:`);
+                return;
+            }
+
+            console.log(`[AutoReply] ${platform} 平台处理器加载完成`);
+
+            // ✅ 启动监听
+            startObserver(platform);
+
+        } catch (error) {
+            console.error(`[AutoReply] 脚本注入失败:`, error);
+        }
     }
 
-    function startObserver() {
-        // 加防抖，避免频繁触发
-        let debounceTimer;
-        const observer = new MutationObserver(() => {
-            clearTimeout(debounceTimer);
-            debounceTimer = setTimeout(() => {
-                if (typeof window.extractNewComments === 'function') {
-                    window.extractNewComments();
-                }
-            }, 300); // 300ms 内只执行一次
-        });
+    let observerInstance = null;
+    let isObserverStarted = false;  // ✅ 新增：是否已经启动过（包括重试中）
+    const processedMessageIds = new Set();// ✅ 记录已处理的消息 ID
 
-        observer.observe(document.body, { childList: true, subtree: true });
+    function startObserver(platform) {
+        // ✅ 如果已经启动过（无论是成功还是在重试），就不再重复执行
+        if (isObserverStarted) {
+            console.log('[AutoReply] Observer 已启动或正在重试，跳过');
+            return;
+        }
+
+        // ✅ 标记为“已启动”，防止后续重复调用
+        isObserverStarted = true;
+
+        // 改成你平台的实际选择器
+        const containerSelector = window.AutoReplyCore.SELECTORS.COMMENT_CONTAINER[platform];
+        // 使用 XPath 工具查询页面中所有匹配的消息项（可能是多个评论 DOM 节点）
+        const container_items = window.AutoReplyCore.XPathUtil.query(containerSelector);
+
+        let debounceTimer;
+
+        if(container_items){
+            console.log("✅ 找到消息容器:", container_items);
+
+            observerInstance = new MutationObserver((mutations) => {
+                // ✅ 只处理有新增节点的情况
+                const hasNewNodes = mutations.some(mutation => mutation.addedNodes.length > 0);
+                if (!hasNewNodes) return;
+
+                clearTimeout(debounceTimer);
+                debounceTimer = setTimeout(() => {
+                    const container_items = window.AutoReplyCore.XPathUtil.query(containerSelector);
+
+                    if (container_items && typeof window.extractNewComments === 'function') {
+                        window.extractNewComments();
+                    }
+                }, 300);
+            });
+
+            observerInstance.observe(container_items, {
+                childList: true,
+                subtree: true
+            });
+
+            console.log('[AutoReply] Observer 已绑定到消息容器');
+        }
+        else{
+            console.warn('[AutoReply] 消息容器未找到，1秒后重试');
+
+            setTimeout(() => {
+                // ✅ 重置 isObserverStarted，允许再次尝试
+                isObserverStarted = false;
+                startObserver(platform);
+            }, 1000);
+        }
     }
 
     // ============ 按需注入 panel.js（懒加载）============
@@ -393,7 +441,6 @@
         // 监听脚本加载失败事件
         script.onerror = () => {
             console.error('[AutoReply] panel.js 加载失败：检查路径或 web_accessible_resources 配置');
-            alert('面板加载失败，请刷新页面重试。');
         };
 
         // 将 script 添加到页面头部开始加载
@@ -424,7 +471,6 @@
                     // 失败原因：配置获取失败 或 injectConfigPanel 未定义
                     const errorMsg = !response?.success ? response?.error : '面板初始化函数未加载';
                     console.error('[AutoReply] 初始化失败:', errorMsg);
-                    alert('面板初始化失败：' + (errorMsg || '未知错误'));
                 }
             });
         });
@@ -499,7 +545,21 @@
     // ========================
     window.custAssistant = new CustAssistant();
 
-    console.log("call injectCoreAndPlatform:");
-    // 注入核心模块（例：douyin_im）
-    injectCoreAndPlatform(getPlatform());
+    console.log("call injectCommentsHandler:");
+
+    async function start() {
+        const platform = getPlatform();
+        console.log('[AutoReply] 检测到平台:', platform);
+
+        if (platform === 'unknown') {
+            console.log('[AutoReply] 非支持页面，不注入脚本');
+            return;
+        }
+
+        // ✅ 调用你定义的函数：注入核心配置 + 平台脚本
+        await injectCommentsHandler(platform);
+    }
+
+    start();
+
 })();

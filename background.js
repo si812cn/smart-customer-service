@@ -10,19 +10,14 @@ import { withLogging } from './ui/middleware/logging.js';
 import { withAuth } from './ui/middleware/auth.js'; // 可选
 import { handleCallAI } from './ui/handlers/ai.js';
 import { DEFAULT_CONFIG } from './ui/handlers/config.js';
+import { handleInitConfig } from './ui/handlers/config.js';
 import { handleGetConfig } from './ui/handlers/config.js';
 import { handleSaveConfig } from './ui/handlers/config.js';
 
 // 初始化：如果 storage 没有配置，写入默认值
-chrome.runtime.onInstalled.addListener(() => {
-    chrome.storage.local.get(['config'], (result) => {
-        if (!result.config) {
-            chrome.storage.local.set({ config: DEFAULT_CONFIG }, () => {
-                console.log('✅ 默认配置已写入 storage');
-            });
-        }
-    });
-});
+// 扩展安装或浏览器启动后检查更新
+chrome.runtime.onStartup.addListener(handleInitConfig);
+chrome.runtime.onInstalled.addListener(handleInitConfig);
 
 // === AI 自动回复请求处理 ===
 // 当收到类型为 "callAI" 的消息时，触发 AI 回复生成流程
@@ -72,6 +67,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 }
             });
         });
+
+        return true; // 保持异步响应通道
+    }
+    else if (message.type === 'INJECT_COMMENTS_HANDLER_SCRIPT') {
+        const { platform } = message;
+        const tabId = sender.tab.id;
+
+        chrome.scripting.executeScript({
+            target: { tabId },
+            files: [`ui/handlers/${platform}.js`]
+        })
+            .then(() => {
+                sendResponse({ success: true });
+            })
+            .catch((error) => {
+                console.error('注入失败:', error);
+                sendResponse({ success: false, error: error.message });
+            });
 
         return true; // 保持异步响应通道
     }

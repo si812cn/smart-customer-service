@@ -46,6 +46,10 @@ function injectConfigPanel(Config = {}) {
             apiBase: '',
             hookBase: '',
             audioBase: ''
+        },
+        sys: {
+            dataCenterUrl : 'http://127.0.0.1:8089', //数据中心服务器地址
+            lastUpdate : ''         //在 storage 中记录上次从服务器获取最新配置的更新时间，
         }
     };
 
